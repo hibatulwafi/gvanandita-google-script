@@ -1,0 +1,96 @@
+<style>
+  .tab-button-absensi {
+    flex-grow: 1;
+    padding: 12px 20px;
+    border: none;
+    background-color: transparent;
+    font-size: 1em;
+    font-weight: 600;
+    cursor: pointer;
+    color: #555;
+    border-bottom: 3px solid transparent;
+    transition: all 0.3s ease;
+    text-align: center;
+  }
+
+  .tab-button-absensi:hover:not(.active) {
+    background-color: #dee2e6;
+    color: #333;
+  }
+
+  .tab-button-absensi.active {
+    background-color: #007bff;
+    color: white;
+    border-bottom: 3px solid #0056b3;
+  }
+
+  .tab-content-absensi {
+    background-color: #ffffff;
+    border-radius: 10px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    padding: 25px;
+    display: none;
+    min-height: 50vh;
+  }
+
+  .tab-content-absensi.active {
+    display: block;
+  }
+
+  .table-absensi {
+    max-height: 70vh;
+  }
+
+  .table-absensi th:first-child,
+  .table-absensi td:first-child {
+    width: 40px;
+    text-align: center;
+  }
+</style>
+
+<div class="tab-container">
+  <button class="tab-button-absensi active" onclick="openAbsensiTab(event, 'monthlyAbsensi')">Laporan Absensi Bulanan</button>
+  <button class="tab-button-absensi" onclick="openAbsensiTab(event, 'dailyAbsensi')">Laporan Absensi Harian</button>
+</div>
+
+<div id="monthlyAbsensi" class="tab-content-absensi" style="display: block;">
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 50px;">No.</th>
+        <th>Nama Marketing</th>
+        <th>Jumlah Hari Kerja</th>
+        <th>Total Kunjungan</th>
+        <th>Rata-Rata Kunjungan</th>
+        <th>Persentase Kehadiran</th>
+      </tr>
+    </thead>
+    <tbody id="absensiTableBody" class="table-absensi">
+      <tr>
+        <td colspan="6" style="text-align: center;">Memuat data...</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div id="dailyAbsensi" class="tab-content-absensi" style="display: block;">
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 40px;">No.</th>
+        <th>Nama Marketing</th>
+        <th>Tanggal</th>
+        <th>Nama/Calon Anggota</th>
+        <th>Alamat</th>
+        <th>FU Via</th>
+        <th>Keterangan</th>
+        <th>Hasil</th>
+      </tr>
+    </thead>
+    <tbody id="absensiDailyTableBody" class="table-absensi">
+      <tr>
+        <td colspan="8" style="text-align: center;">Memuat data...</td>
+      </tr>
+    </tbody>
+  </table>
+</div>

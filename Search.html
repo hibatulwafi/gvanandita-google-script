@@ -1,0 +1,26 @@
+<div class="filters">
+  <label for="periodTypeFilter">Tipe Periode:</label>
+  <select id="periodTypeFilter" onchange="togglePeriodFilters()">
+    <option value="monthly" selected>Bulanan</option>
+    <!-- <option value="weekly">Mingguan</option> -->
+  </select>
+
+  <div id="monthlyFilters" class="filter-group">
+    <label for="monthFilter">Bulan:</label>
+    <select id="monthFilter" onchange="updateDashboardView()"></select>
+    <label for="yearFilter">Tahun:</label>
+    <select id="yearFilter" onchange="updateDashboardView()"></select>
+  </div>
+
+  <div id="weeklyFilters" class="filter-group" style="display:none;">
+    <label for="weekNumberFilter">Minggu Ke-:</label>
+    <select id="weekNumberFilter" onchange="updateDashboardView()"></select>
+    <label for="weeklyYearFilter">Tahun:</label>
+    <select id="weeklyYearFilter" onchange="updateDashboardView()"></select>
+  </div>
+
+  <label for="marketingFilter">Marketing:</label>
+  <select id="marketingFilter" onchange="updateDashboardView()">
+    <option value="All">Semua Marketing</option>
+  </select>
+</div>

@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <base target="_top">
+  <title>Dashboard Monitoring - Glory Victory Anandita</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <?!= include('Styles'); ?>
+</head>
+
+<body>
+  <div class="loading-overlay" id="loadingOverlay">
+    <img src="https://i.gifer.com/AqA0.gif" alt="Loading..." />
+      Memuat Dashboard...
+  </div>
+
+  <?!= include('Header'); ?>
+  <?!= include('Search'); ?>
+  <?!= include('Summary'); ?>
+  <?!= include('Tabs'); ?>
+
+  <div id="laporanUtama" class="tab-content active">
+    <?!= include('TabLaporanUtama'); ?>
+  </div>
+
+  <div id="analisisVisual" class="tab-content">
+    <?!= include('TabAnalisisVisual'); ?>
+  </div>
+
+  <div id="perhitunganGaji" class="tab-content">
+    <?!= include('TabPerhitunganGaji'); ?>
+  </div>
+
+  <div id="laporanAbsensi" class="tab-content">
+    <?!= include('TabLaporanAbsensi'); ?>
+  </div>
+
+  <?!= include('Scripts'); ?>
+  <?!= include('Footer'); ?>
+</body>
+
+</html>

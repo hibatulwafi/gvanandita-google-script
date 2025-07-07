@@ -1,0 +1,617 @@
+<script>
+  const monthNames = [
+    'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli',
+    'Agustus', 'September', 'Oktober', 'November', 'Desember'
+  ];
+
+  let currentCharts = {}; // Object to hold Chart.js instances
+
+  function toggleLoading(show) {
+    document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    populateFilters();
+    populateWeeklyFilters();
+    // Set default period to current month/year on load
+    const today = new Date();
+    document.getElementById('monthFilter').value = today.getMonth() + 1;
+    document.getElementById('yearFilter').value = today.getFullYear();
+
+    updateDashboardView();
+    openTab(null, 'laporanUtama');
+    openAbsensiTab(null,'monthlyAbsensi');
+  });
+
+  function populateFilters() {
+    const monthFilter = document.getElementById('monthFilter');
+    const yearFilter = document.getElementById('yearFilter');
+    const marketingFilter = document.getElementById('marketingFilter');
+    const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().getMonth();
+
+    // Populate Month Filter
+    monthNames.forEach((month, index) => {
+      const option = document.createElement('option');
+      option.value = index + 1; // Use 1-based index for month
+      option.textContent = month;
+      if (index === currentMonth) option.selected = true;
+      monthFilter.appendChild(option);
+    });
+
+    // Populate Year Filter (monthly)
+    for (let i = currentYear - 5; i <= currentYear + 2; i++) {
+      const option = document.createElement('option');
+      option.value = i;
+      option.textContent = i;
+      if (i === currentYear) option.selected = true;
+      yearFilter.appendChild(option);
+    }
+
+    // Populate Marketing Filter - This will be fetched from server
+    google.script.run
+      .withSuccessHandler(function(marketingNames) {
+        // Clear existing options except 'All'
+        marketingFilter.innerHTML = '<option value="All">Semua Marketing</option>';
+        marketingNames.forEach(name => {
+          const option = document.createElement('option');
+          option.value = name;
+          option.textContent = name;
+          marketingFilter.appendChild(option);
+        });
+      })
+      .withFailureHandler(handleError)
+      .getAllMarketingNames(); // Make sure you have this function in Code.gs
+  }
+
+  function populateWeeklyFilters() {
+    const weekNumberFilter = document.getElementById('weekNumberFilter');
+    const weeklyYearFilter = document.getElementById('weeklyYearFilter');
+    const currentYear = new Date().getFullYear();
+
+    // Populate Week Number Filter (assuming 52 weeks)
+    weekNumberFilter.innerHTML = ''; // Clear existing options first
+    for (let i = 1; i <= 52; i++) {
+      const option = document.createElement('option');
+      option.value = i;
+      option.textContent = `Minggu ${i}`;
+      weekNumberFilter.appendChild(option);
+    }
+
+    // Populate Year Filter (weekly)
+    weeklyYearFilter.innerHTML = ''; // Clear existing options first
+    for (let i = currentYear - 5; i <= currentYear + 2; i++) {
+      const option = document.createElement('option');
+      option.value = i;
+      option.textContent = i;
+      if (i === currentYear) option.selected = true;
+      weeklyYearFilter.appendChild(option);
+    }
+  }
+
+
+  function togglePeriodFilters() {
+    const periodType = document.getElementById('periodTypeFilter').value;
+    const monthlyFilters = document.getElementById('monthlyFilters');
+    const weeklyFilters = document.getElementById('weeklyFilters');
+
+    if (periodType === 'monthly') {
+      monthlyFilters.style.display = 'flex';
+      weeklyFilters.style.display = 'none';
+    } else { // weekly
+      monthlyFilters.style.display = 'none';
+      weeklyFilters.style.display = 'flex';
+    }
+    updateDashboardView(); // Refresh data based on new period type
+  }
+
+  function updateDashboardView() {
+    toggleLoading(true);
+
+    const periodType = document.getElementById('periodTypeFilter').value;
+    const selectedMarketing = document.getElementById('marketingFilter').value;
+
+    let month = null;
+    let year = null;
+    let weekNumber = null;
+    let weeklyYear = null;
+
+    if (periodType === 'monthly') {
+      month = parseInt(document.getElementById('monthFilter').value);
+      year = parseInt(document.getElementById('yearFilter').value);
+    } else { // weekly
+      weekNumber = parseInt(document.getElementById('weekNumberFilter').value);
+      weeklyYear = parseInt(document.getElementById('weeklyYearFilter').value);
+    }
+
+    google.script.run
+      .withSuccessHandler(displayDashboardData)
+      .withFailureHandler(handleError)
+      .getDashboardData(month, year, selectedMarketing, periodType, weekNumber, weeklyYear);
+  }
+
+  function displayDashboardData(data) {
+    toggleLoading(false);
+    window.dashboardData = data; // Store globally for chart rendering
+
+    if (data) { // Cek data secara keseluruhan, bukan hanya summary
+      // Bagian Summary Cards
+      if (data.summary) {
+        document.getElementById('totalGrowth').textContent = formatCurrency(data.summary.totalGrowth);
+        document.getElementById('totalGrowth').classList.toggle('negative', data.summary.totalGrowth < 0);
+        document.getElementById('overallTarget').textContent = data.summary.overallTargetPercentage.toFixed(2) + '%';
+        document.getElementById('totalInflow').textContent = formatCurrency(data.summary.totalInflow);
+        document.getElementById('totalOutflow').textContent = formatCurrency(data.summary.totalOutflow);
+        document.getElementById('totalOutflow').classList.toggle('negative', data.summary.totalOutflow < 0);
+        document.getElementById('totalGaji').textContent = formatCurrency(data.summary.totalGaji);
+        document.getElementById('totalKomisi').textContent = formatCurrency(data.summary.totalKomisi);
+        document.getElementById('totalProspect').textContent = data.summary.totalProspect;
+        document.getElementById('totalClosing').textContent = data.summary.totalClosing;
+      } else {
+        // Handle case where summary data is missing
+        document.getElementById('totalGrowth').textContent = 'Rp0';
+        document.getElementById('overallTarget').textContent = '0%';
+        document.getElementById('totalInflow').textContent = 'Rp0';
+        document.getElementById('totalOutflow').textContent = 'Rp0';
+        document.getElementById('totalGaji').textContent = 'Rp0';
+        document.getElementById('totalKomisi').textContent = 'Rp0';
+        document.getElementById('totalProspect').textContent = '0';
+        document.getElementById('totalClosing').textContent = '0';
+      }
+
+      // Tampilkan data performance
+      const performanceTableBody = document.getElementById('performanceTableBody');
+      if (performanceTableBody) {
+        performanceTableBody.innerHTML = ''; // Bersihkan isi tabel sebelumnya
+        if (data.performanceData && data.performanceData.length > 0) {
+          data.performanceData.forEach(item => {
+            const row = performanceTableBody.insertRow();
+            row.insertCell(0).textContent = item.name;
+            row.insertCell(1).textContent = (item.performance * 100).toFixed(2) + '%'; 
+            row.insertCell(2).textContent = formatCurrency(item.commission);
+            row.insertCell(3).textContent = formatCurrency(item.inflow);
+            row.insertCell(4).textContent = item.totalProspect; // Prospect Berjalan
+          });
+        } else {
+          performanceTableBody.innerHTML = '<tr><td colspan="5" style="text-align: center;">Tidak ada data performance untuk periode ini.</td></tr>';
+        }
+      } else {
+        console.error("Elemen 'performanceTableBody' tidak ditemukan.");
+      }
+
+      // Tampilkan data gaji dan komisi
+      const gajiKomisiTableBody = document.getElementById('gajiKomisiTableBody');
+      if (gajiKomisiTableBody) {
+        gajiKomisiTableBody.innerHTML = '';
+        if (data.gajiKomisiData && data.gajiKomisiData.length > 0) {
+          data.gajiKomisiData.forEach(item => {
+            const row = gajiKomisiTableBody.insertRow();
+            row.insertCell(0).textContent = item.name;
+            row.insertCell(1).textContent = formatCurrency(item.gajiKontrakAwal);
+            row.insertCell(2).textContent = formatCurrency(item.gajiFinal);
+            row.insertCell(3).textContent = formatCurrency(item.feeMarketingCair);
+            row.insertCell(4).textContent = formatCurrency(item.rewardTambahan);
+            row.insertCell(5).textContent = formatCurrency(item.totalKomisi);
+            row.insertCell(6).textContent = formatCurrency(item.totalDibayarkan);
+          });
+        } else {
+          gajiKomisiTableBody.innerHTML = '<tr><td colspan="7" style="text-align: center;">Tidak ada data gaji dan komisi untuk periode ini.</td></tr>';
+        }
+      } else {
+        console.error("Elemen 'gajiKomisiTableBody' tidak ditemukan.");
+      }
+
+      // Tampilkan data Negative Growth Table
+      const negativeGrowthTableBody = document.getElementById('negativeGrowthTableBody');
+      if (negativeGrowthTableBody) {
+        negativeGrowthTableBody.innerHTML = '';
+        if (data.negativeGrowth && data.negativeGrowth.length > 0) {
+          data.negativeGrowth.forEach(item => {
+            const row = negativeGrowthTableBody.insertRow();
+            row.insertCell(0).textContent = item.name;
+            row.insertCell(1).textContent = formatCurrency(item.performance); // Assuming performance here is growth (Rp)
+          });
+        } else {
+          negativeGrowthTableBody.innerHTML = '<tr><td colspan="2" style="text-align: center;">Tidak ada marketing dengan pertumbuhan negatif.</td></tr>';
+        }
+      } else {
+        console.error("Elemen 'negativeGrowthTableBody' tidak ditemukan.");
+      }
+
+      // Tampilkan data Absensi
+      const absensiTableBody = document.getElementById('absensiTableBody');
+      if (absensiTableBody) {
+        absensiTableBody.innerHTML = ''; // Bersihkan isi tabel sebelumnya
+        if (data.absensiData && data.absensiData.length > 0) {
+          let no = 1;
+          data.absensiData.forEach(item => {
+            const row = absensiTableBody.insertRow();
+            row.insertCell(0).textContent = no++;
+            row.insertCell(1).textContent = item.name;
+            row.insertCell(2).textContent = item.jumlahHariKerja;
+            row.insertCell(3).textContent = item.totalKunjungan;
+            row.insertCell(4).textContent = item.rataRataKunjungan.toFixed(2) + '/hari';
+            row.insertCell(5).textContent = item.presentase + '%';
+          });
+        } else {
+          absensiTableBody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Tidak ada data absensi untuk periode ini.</td></tr>';
+        }
+      } else {
+        console.error("Elemen 'absensiTableBody' tidak ditemukan.");
+      }
+
+      // Tampilkan data Daily
+      const absensiDailyTableBody = document.getElementById('absensiDailyTableBody');
+      if (absensiDailyTableBody) {
+        absensiDailyTableBody.innerHTML = ''; // Bersihkan isi tabel sebelumnya
+        if (data.absensiDailyData && data.absensiDailyData.length > 0) {
+          let no = 1;
+          data.absensiDailyData.forEach(item => {
+            const row = absensiDailyTableBody.insertRow();
+            row.insertCell(0).textContent = no++;
+            row.insertCell(1).textContent = item.name ;
+            row.insertCell(2).textContent = item.tanggal;
+            row.insertCell(3).textContent = item.namaAnggotaCalonAnggota;
+            row.insertCell(4).textContent = item.alamat;
+            row.insertCell(5).textContent = item.fuVia;
+            row.insertCell(6).textContent = item.keterangan;
+            row.insertCell(7).textContent = item.hasilKunjungan;
+          });
+        } else {
+          absensiDailyTableBody.innerHTML = '<tr><td colspan="8" style="text-align: center;">Tidak ada data absensi untuk periode ini.</td></tr>';
+        }
+      } else {
+        console.error("Elemen 'absensiDailyTableBody' tidak ditemukan.");
+      }
+
+      // Render charts when data is available (jika tab analisis visual aktif)
+      if (document.getElementById('analisisVisual').classList.contains('active')) {
+        renderCharts(data);
+      } else {
+        // Destroy existing charts if not on analysis tab
+        for (const chartId in currentCharts) {
+          if (currentCharts[chartId]) {
+            currentCharts[chartId].destroy();
+            currentCharts[chartId] = null;
+          }
+        }
+      }
+
+    } else {
+      console.error("Data dashboard tidak ditemukan atau kosong.");
+      // Clear all elements if data is null or summary is missing
+      document.getElementById('totalGrowth').textContent = 'Rp0';
+      document.getElementById('overallTarget').textContent = '0%';
+      document.getElementById('totalInflow').textContent = 'Rp0';
+      document.getElementById('totalOutflow').textContent = 'Rp0';
+      document.getElementById('totalGaji').textContent = 'Rp0';
+      document.getElementById('totalKomisi').textContent = 'Rp0';
+      document.getElementById('totalProspect').textContent = '0';
+      document.getElementById('totalClosing').textContent = '0';
+      document.getElementById('performanceTableBody').innerHTML = '<tr><td colspan="5" style="text-align: center;">Tidak ada data yang tersedia.</td></tr>';
+      document.getElementById('negativeGrowthTableBody').innerHTML = '<tr><td colspan="2" style="text-align: center;">Tidak ada data.</td></tr>';
+      document.getElementById('gajiKomisiTableBody').innerHTML = '<tr><td colspan="7" style="text-align: center;">Tidak ada data.</td></tr>';
+      document.getElementById('absensiTableBody').innerHTML = '<tr><td colspan="4" style="text-align: center;">Tidak ada data.</td></tr>';
+
+      // Destroy existing charts
+      for (const chartId in currentCharts) {
+        if (currentCharts[chartId]) {
+          currentCharts[chartId].destroy();
+          currentCharts[chartId] = null;
+        }
+      }
+    }
+  }
+
+  function handleError(error) {
+    toggleLoading(false);
+    alert('Terjadi kesalahan saat memuat data: ' + error.message);
+    console.error(error);
+  }
+
+  function formatCurrency(amount) {
+    if (typeof amount !== 'number' || isNaN(amount)) return 'Rp0'; // Handle non-numeric or NaN input
+    return new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    }).format(amount);
+  }
+
+  // --- Tab Management ---
+  function openTab(evt, tabName) {
+    var i, tabcontent, tablinks;
+    tabcontent = document.getElementsByClassName("tab-content");
+    for (i = 0; i < tabcontent.length; i++) {
+      tabcontent[i].style.display = "none";
+      tabcontent[i].classList.remove('active');
+    }
+    tablinks = document.getElementsByClassName("tab-button");
+    for (i = 0; i < tablinks.length; i++) {
+      tablinks[i].className = tablinks[i].className.replace(" active", "");
+    }
+
+    const selectedTab = document.getElementById(tabName);
+    if (selectedTab) {
+      selectedTab.style.display = "block";
+      selectedTab.classList.add('active');
+    }
+    if (evt) { // Only add active class if clicked
+      evt.currentTarget.className += " active";
+    } else { // For initial load, set active class on the default button
+      const defaultButton = document.querySelector(`.tab-button[onclick*='${tabName}']`);
+      if (defaultButton) {
+        defaultButton.className += " active";
+      }
+    }
+
+    // Render charts if "Analisis Visual" tab is opened AND data is available
+    if (tabName === 'analisisVisual' && window.dashboardData) {
+      renderCharts(window.dashboardData);
+    } else {
+      // Destroy charts if switching away from Analisis Visual tab
+      for (const chartId in currentCharts) {
+        if (currentCharts[chartId]) {
+          currentCharts[chartId].destroy();
+          currentCharts[chartId] = null;
+        }
+      }
+    }
+  }
+
+  function openAbsensiTab(evt, tabName) {
+    let i, tabcontent, tabbuttons;
+
+    tabcontent = document.getElementsByClassName("tab-content-absensi");
+    for (i = 0; i < tabcontent.length; i++) {
+      tabcontent[i].style.display = "none";
+    }
+
+    tabbuttons = document.getElementsByClassName("tab-button-absensi");
+    for (i = 0; i < tabbuttons.length; i++) {
+      tabbuttons[i].className = tabbuttons[i].className.replace(" active", "");
+    }
+
+    const selectedTab = document.getElementById(tabName);
+    if (selectedTab) {
+      selectedTab.style.display = "block";
+      selectedTab.classList.add('active');
+    }
+
+    if (evt) { // Only add active class if clicked
+      evt.currentTarget.className += " active";
+    } else { // For initial load, set active class on the default button
+      const defaultButton = document.querySelector(`.tab-button-absensi[onclick*='${tabName}']`);
+      if (defaultButton) {
+        defaultButton.className += " active";
+      }
+    }
+
+  }
+
+
+  // --- Chart Rendering Functions ---
+  function renderCharts(data) {
+    // Destroy existing charts before rendering new ones
+    for (const chartId in currentCharts) {
+      if (currentCharts[chartId]) {
+        currentCharts[chartId].destroy();
+        currentCharts[chartId] = null;
+      }
+    }
+
+    if (!data || !data.performanceData || data.performanceData.length === 0) {
+      console.warn("Tidak ada data performance untuk merender grafik.");
+      // Optionally display a message in the chart areas (clear canvas)
+      const chartIds = ['performanceChart', 'inflowChart', 'prospectChart', 'closingChart'];
+      chartIds.forEach(id => {
+        const canvas = document.getElementById(id);
+        if (canvas) {
+          const ctx = canvas.getContext('2d');
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          // Optional: Add text like "No data available" on the canvas
+          ctx.font = "16px Arial";
+          ctx.textAlign = "center";
+          ctx.fillStyle = "#888";
+          ctx.fillText("Tidak ada data untuk grafik ini.", canvas.width / 2, canvas.height / 2);
+        }
+      });
+      return;
+    }
+
+    const marketingNames = data.performanceData.map(item => item.name);
+    const performancePercentages = data.performanceData.map(item => item.performance);
+    const totalInflows = data.performanceData.map(item => item.totalInflow);
+    const totalProspects = data.performanceData.map(item => item.totalProspect);
+    const totalClosings = data.performanceData.map(item => item.totalClosing);
+
+    // Chart 1: Performance (%) Marketing
+    const performanceCtx = document.getElementById('performanceChart').getContext('2d');
+    currentCharts.performanceChart = new Chart(performanceCtx, {
+      type: 'bar',
+      data: {
+        labels: marketingNames,
+        datasets: [{
+          label: 'Pencapaian (%)',
+          data: performancePercentages,
+          backgroundColor: 'rgba(75, 192, 192, 0.6)',
+          borderColor: 'rgba(75, 192, 192, 1)',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: {
+            beginAtZero: true,
+            title: {
+              display: true,
+              text: 'Pencapaian (%)'
+            },
+            ticks: {
+              callback: function(value) {
+                return value + '%';
+              }
+            }
+          },
+          x: {
+            title: {
+              display: true,
+              text: 'Nama Marketing'
+            }
+          }
+        },
+        plugins: {
+          tooltip: {
+            callbacks: {
+              label: function(context) {
+                let label = context.dataset.label || '';
+                if (label) {
+                  label += ': ';
+                }
+                if (context.parsed.y !== null) {
+                  label += context.parsed.y.toFixed(2) + '%';
+                }
+                return label;
+              }
+            }
+          }
+        }
+      }
+    });
+
+    // Chart 2: Total Inflow per Marketing
+    const inflowCtx = document.getElementById('inflowChart').getContext('2d');
+    currentCharts.inflowChart = new Chart(inflowCtx, {
+      type: 'bar',
+      data: {
+        labels: marketingNames,
+        datasets: [{
+          label: 'Total Inflow (Rp)',
+          data: totalInflows,
+          backgroundColor: 'rgba(153, 102, 255, 0.6)',
+          borderColor: 'rgba(153, 102, 255, 1)',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: {
+            beginAtZero: true,
+            title: {
+              display: true,
+              text: 'Total Inflow (Rp)'
+            },
+            ticks: {
+              callback: function(value) {
+                return formatCurrency(value);
+              }
+            }
+          },
+          x: {
+            title: {
+              display: true,
+              text: 'Nama Marketing'
+            }
+          }
+        },
+        plugins: {
+          tooltip: {
+            callbacks: {
+              label: function(context) {
+                let label = context.dataset.label || '';
+                if (label) {
+                  label += ': ';
+                }
+                if (context.parsed.y !== null) {
+                  label += formatCurrency(context.parsed.y);
+                }
+                return label;
+              }
+            }
+          }
+        }
+      }
+    });
+
+    // Chart 3: Total Prospect per Marketing
+    const prospectCtx = document.getElementById('prospectChart').getContext('2d');
+    currentCharts.prospectChart = new Chart(prospectCtx, {
+      type: 'bar',
+      data: {
+        labels: marketingNames,
+        datasets: [{
+          label: 'Total Prospect',
+          data: totalProspects,
+          backgroundColor: 'rgba(255, 159, 64, 0.6)',
+          borderColor: 'rgba(255, 159, 64, 1)',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: {
+            beginAtZero: true,
+            title: {
+              display: true,
+              text: 'Jumlah Prospect'
+            },
+            ticks: {
+              precision: 0
+            }
+          },
+          x: {
+            title: {
+              display: true,
+              text: 'Nama Marketing'
+            }
+          }
+        }
+      }
+    });
+
+    // Chart 4: Total Closing per Marketing
+    const closingCtx = document.getElementById('closingChart').getContext('2d');
+    currentCharts.closingChart = new Chart(closingCtx, {
+      type: 'bar',
+      data: {
+        labels: marketingNames,
+        datasets: [{
+          label: 'Total Closing',
+          data: totalClosings,
+          backgroundColor: 'rgba(255, 99, 132, 0.6)',
+          borderColor: 'rgba(255, 99, 132, 1)',
+          borderWidth: 1
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: {
+            beginAtZero: true,
+            title: {
+              display: true,
+              text: 'Jumlah Closing'
+            },
+            ticks: {
+              precision: 0
+            }
+          },
+          x: {
+            title: {
+              display: true,
+              text: 'Nama Marketing'
+            }
+          }
+        }
+      }
+    });
+  }
+</script>

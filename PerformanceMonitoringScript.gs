@@ -1,19 +1,23 @@
 // --- Global Constants (Konstanta Global) ---
-const SPREADSHEET_ID = '1eZxURW6yArfKbksTBQ_3fAKfcwS4m9drArefsuiYRdU'; // Ganti dengan ID Spreadsheet Anda
-const DATA_MASTER_SHEET_NAME = 'MASTER LENDING'; // Nama sheet utama yang berisi data transaksi lending
-const MASTER_KARYAWAN_SHEET_NAME = 'MASTER KARYAWAN'; // Nama sheet untuk data marketing/target
+/** Spreadsheet Data Master */
+const SPREADSHEET_ID = '1eZxURW6yArfKbksTBQ_3fAKfcwS4m9drArefsuiYRdU';
+const DATA_MASTER_SHEET_NAME = 'MASTER LENDING';
+const MASTER_KARYAWAN_SHEET_NAME = 'MASTER KARYAWAN';
+
+/** Spreadsheet Absensi */
+const SPREADSHEET_ABSENSI_ID = '1MwDFnkUBDbAhSKqW4Y_dRTuivZdX-TCqmfviC4xcJN0';
+const ABSENSI_SHEET_NAME = 'Form Responses 1';
 
 // --- Web App Entry Point ---
-/**
- * Fungsi untuk melayani permintaan web (GET).
- * Ini akan memuat file HTML.
- */
 function doGet() {
-  const htmlOutput = HtmlService
-    .createHtmlOutputFromFile('PerformanceMonitoring.html') // Pastikan nama file HTML benar
-    .setTitle('System Monitoring Kinerja Lending Glory Victory Anandita')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-  return htmlOutput;
+  return HtmlService.createTemplateFromFile('Index')
+    .evaluate()
+    .setTitle('Dashboard Monitoring - Glory Victory Anandita');
+}
+
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename)
+    .getContent();
 }
 
 // --- Public Functions (Dipanggil dari Frontend/HTML) ---
@@ -132,16 +136,36 @@ function getDashboardData(month, year, selectedMarketingParam, periodType, weekN
   // Siapkan data untuk grafik
   const chartData = prepareChartData(performanceData, marketingPerformance);
 
+  // --- Start: Bagian baru untuk Absensi Data ---
+  let startDate, endDate;
+
+  if (periodType === 'monthly') {
+    startDate = new Date(year, month - 1, 1);
+    endDate = new Date(year, month, 0); // Hari terakhir bulan sebelumnya
+  } else { // weekly
+    const date = new Date(weeklyYear, 0, 1 + (weekNumber - 1) * 7);
+    const day = date.getDay();
+    const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+    startDate = new Date(date.setDate(diff));
+    endDate = new Date(startDate);
+    endDate.setDate(startDate.getDate() + 6);
+  }
+  const debugStartDate = new Date('2025-07-01T00:00:00Z');
+  const debugEndDate = new Date('2025-07-31T23:59:59Z');
+
+  const absensiData = getAbsensiData(startDate, endDate);
+  const absensiDailyData = getAbsensiDailyData(debugStartDate, debugEndDate, 'All');
+
   const summary = {
-    totalGrowth: marketingPerformance.hasOwnProperty('All') ? marketingPerformance['All'].inflow - marketingPerformance['All'].outflow : 0, // Ini mungkin perlu disesuaikan jika 'All' tidak ada
+    totalGrowth: marketingPerformance.hasOwnProperty('All') ? marketingPerformance['All'].inflow - marketingPerformance['All'].outflow : 0,
     overallTargetPercentage: totalOverallTarget > 0 ? (getSumOfInflow(marketingPerformance) / totalOverallTarget) * 100 : 0,
-    totalInflow: getSumOfInflow(marketingPerformance), // Mengambil total inflow dari semua marketer
-    totalOutflow: getSumOfOutflow(marketingPerformance), // Mengambil total outflow dari semua marketer
+    totalInflow: getSumOfInflow(marketingPerformance),
+    totalOutflow: getSumOfOutflow(marketingPerformance),
     totalGaji: totalGajiKeseluruhan,
     totalKomisi: totalKomisiKeseluruhan,
     activeMarketers: activeMarketersCount,
-    totalProspect: totalProspectCount, // ini total prospek global dari filterLendingData
-    totalClosing: totalClosingCount, // ini total closing global dari filterLendingData
+    totalProspect: totalProspectCount,
+    totalClosing: totalClosingCount,
     totalTarget: totalOverallTarget
   };
 
@@ -153,13 +177,102 @@ function getDashboardData(month, year, selectedMarketingParam, periodType, weekN
     bottom5Kinerja: chartData.bottom5Kinerja,
     top5Growth: chartData.top5Growth,
     negativeGrowth: chartData.negativeGrowth,
-    growthVsTarget: chartData.growthVsTarget
+    growthVsTarget: chartData.growthVsTarget,
+    absensiData: absensiData,
+    absensiDailyData: absensiDailyData,
+    reportStartDate: startDate.getTime(),
+    reportEndDate: endDate.getTime()
   };
 
   Logger.log("[END] getDashboardData. Returning object (excerpt performanceData): " + JSON.stringify(result.performanceData.slice(0, 5)));
   Logger.log("[END] getDashboardData. Returning object (excerpt gajiKomisiData): " + JSON.stringify(result.gajiKomisiData.slice(0, 5)));
+  Logger.log("[END] getDashboardData. Returning object (excerpt absensiData): " + JSON.stringify(result.absensiData.slice(0, 5)));
+  Logger.log("[END] getDashboardData. Returning object (excerpt absensiDailyData): " + JSON.stringify(result.absensiDailyData.slice(0, 5)));
+
 
   return result;
+}
+
+/**
+ * Menghitung total inflow untuk periode waktu sebelumnya.
+ *
+ * @param {number} currentMonth Bulan saat ini (1-12).
+ * @param {number} currentYear Tahun saat ini.
+ * @param {string} periodType Tipe periode ('monthly' atau 'weekly').
+ * @param {number} currentWeekNumber Nomor minggu saat ini (1-52/53).
+ * @param {number} currentWeeklyYear Tahun minggu saat ini.
+ * @returns {number} Total inflow dari periode sebelumnya.
+ */
+function getPreviousPeriodInflow(currentMonth, currentYear, periodType, currentWeekNumber, currentWeeklyYear) {
+  let prevStartDate, prevEndDate;
+
+  if (periodType === 'monthly') {
+    let prevMonth = currentMonth - 1;
+    let prevYear = currentYear;
+    if (prevMonth === 0) { // Jika bulan saat ini Januari (1), periode sebelumnya adalah Desember tahun lalu
+      prevMonth = 12;
+      prevYear--;
+    }
+    prevStartDate = new Date(prevYear, prevMonth - 1, 1);
+    prevEndDate = new Date(prevYear, prevMonth, 0); // Hari terakhir bulan sebelumnya
+    prevEndDate.setHours(23, 59, 59, 999);
+  } else { // weekly
+    // Hitung tanggal mulai minggu sebelumnya
+    const currentWeekStart = new Date(currentWeeklyYear, 0, 1 + (currentWeekNumber - 1) * 7);
+    const day = currentWeekStart.getDay();
+    const diff = currentWeekStart.getDate() - day + (day === 0 ? -6 : 1); // Senin minggu ini
+    currentWeekStart.setDate(diff); // Set ke Senin minggu ini
+
+    prevStartDate = new Date(currentWeekStart);
+    prevStartDate.setDate(currentWeekStart.getDate() - 7); // Kurangi 7 hari untuk Senin minggu lalu
+    prevStartDate.setHours(0, 0, 0, 0);
+
+    prevEndDate = new Date(prevStartDate);
+    prevEndDate.setDate(prevStartDate.getDate() + 6); // Minggu lalu berakhir 6 hari setelah prevStartDate
+    prevEndDate.setHours(23, 59, 59, 999);
+  }
+
+  Logger.log(`Calculating Previous Period Inflow for: ${prevStartDate.toLocaleDateString()} to ${prevEndDate.toLocaleDateString()}`);
+
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const lendingSheet = ss.getSheetByName(DATA_MASTER_SHEET_NAME);
+
+  if (!lendingSheet) {
+    Logger.log(`Sheet '${DATA_MASTER_SHEET_NAME}' not found.`);
+    return 0;
+  }
+
+  const lendingRows = lendingSheet.getDataRange().getDisplayValues();
+  if (lendingRows.length <= 1) {
+    return 0;
+  }
+
+  const lendingHeader = lendingRows[0];
+  const lendingColMap = createHeaderMap(lendingHeader, DATA_MASTER_SHEET_NAME, ["TANGGAL PENCAIRAN", "PINJAMAN DITERIMA"]);
+
+  const tanggalPencairanCol = lendingColMap["TANGGAL PENCAIRAN"];
+  const pinjamanDiterimaCol = lendingColMap["PINJAMAN DITERIMA"];
+
+  if (tanggalPencairanCol === -1 || pinjamanDiterimaCol === -1) {
+    Logger.log("Kolom 'TANGGAL PENCAIRAN' atau 'PINJAMAN DITERIMA' tidak ditemukan di sheet lending.");
+    return 0;
+  }
+
+  let previousInflow = 0;
+
+  for (let i = 1; i < lendingRows.length; i++) {
+    const row = lendingRows[i];
+    const tanggalPencairan = new Date(row[tanggalPencairanCol]);
+    const pinjamanDiterima = parseFloat(String(row[pinjamanDiterimaCol]).replace(/\./g, '').replace(/,/g, '.')); // Handle IDR format
+
+    if (!isNaN(tanggalPencairan.getTime()) && tanggalPencairan >= prevStartDate && tanggalPencairan <= prevEndDate) {
+      if (!isNaN(pinjamanDiterima)) {
+        previousInflow += pinjamanDiterima;
+      }
+    }
+  }
+  Logger.log(`Previous Period Inflow: ${previousInflow}`);
+  return previousInflow;
 }
 
 // --- Helper Functions (Fungsi Pembantu) ---
@@ -353,7 +466,7 @@ function aggregateLendingData(filteredLendingRows, lendingColMap, marketingPerfo
       const feeMarketingRaw = row[colLendingFeeMarketing];
       const feePercentage = parseNumber(feeMarketingRaw, true);
 
-      const feeMarketingAmount = pinjaman * feePercentage;
+      const feeMarketingAmount = pinjaman * (feePercentage / 100);
 
       if (marketingPerformance[marketingNameInRow]) {
         marketingPerformance[marketingNameInRow].inflow += pinjaman;
@@ -376,7 +489,12 @@ function aggregateLendingData(filteredLendingRows, lendingColMap, marketingPerfo
   return { totalInflowGlobal, totalOutflowGlobal };
 }
 
-
+/**
+ * Menghitung gaji dan komisi untuk setiap marketing.
+ * Memperbarui objek marketingPerformance dengan totalGaji dan totalKomisi.
+ * @param {Object} marketingPerformance Objek kinerja marketing yang sudah diperbarui dengan inflow/outflow.
+ * @returns {Object} Objek berisi data performa, data gaji/komisi, dan total gaji/komisi keseluruhan.
+ */
 /**
  * Menghitung gaji dan komisi untuk setiap marketing.
  * Memperbarui objek marketingPerformance dengan totalGaji dan totalKomisi.
@@ -394,8 +512,8 @@ function calculateGajiKomisi(marketingPerformance) {
   for (const name in marketingPerformance) {
     const data = marketingPerformance[name];
     const target = data.target;
-    const pencapaianInflow = data.inflow;
-    const kinerja = target > 0 ? (pencapaianInflow / target) : 0;
+    const pencapaianInflow = data.inflow; // Ini adalah 'Present'
+    const kinerja = target > 0 ? (pencapaianInflow / target) : 0; // Ini akan tetap sebagai desimal (0.85, 1.0, 1.25)
 
     Logger.log(`Calculating for Marketing ${name}: Inflow=${pencapaianInflow}, Target=${target}, Kinerja=${kinerja.toFixed(2)}`);
 
@@ -411,13 +529,25 @@ function calculateGajiKomisi(marketingPerformance) {
     totalGajiKeseluruhan += gajiFinal;
 
     // Rule 3: Fee 0.25% dari setiap kredit cair (ini adalah 'FEE MARKETING' di sheet)
-    let komisiFeeKreditCair = data.feeMarketingCair; // Ini sudah dihitung di aggregateLendingData
+    // data.feeMarketingCair sudah dihitung di aggregateLendingData
+    let komisiFeeKreditCair = data.feeMarketingCair; 
+    Logger.log(`Marketing ${name}: Komisi Fee Kredit Cair = ${komisiFeeKreditCair.toFixed(2)}`);
 
-    // Rule 2: Reward Tambahan 0.25% jika achievement > 100%
+    // Rule 2: Reward Tambahan 0.25% (diambil dari FEE MARKETING) jika achievement > 100%
+    // Reward berlaku hanya untuk closingan setelah target
     let rewardTambahan = 0;
     if (kinerja > 1.0) {
-      rewardTambahan = 0.0025 * pencapaianInflow;
-      Logger.log(`Marketing ${name}: Kinerja ${kinerja.toFixed(2)} (>1.0). Reward tambahan: ${rewardTambahan.toFixed(2)}`);
+      const excessInflow = pencapaianInflow - target; // Inflow yang melebihi target
+      if (excessInflow > 0) {
+        // Asumsi "diambil dari kolom FEE MARKETING" berarti menggunakan persentase yang sama
+        // 0.25% dari kolom FEE MARKETING, jadi 0.25% dari excessInflow
+        // Perhatikan bahwa di aggregateLendingData, feePercentage sudah dibagi 100 (misal 0.0025)
+        // Jadi di sini kita menggunakan 0.0025 secara langsung (0.25%)
+        rewardTambahan = excessInflow * 0.0025; // 0.25% dari sisa inflow setelah target
+        Logger.log(`Marketing ${name}: Kinerja ${kinerja.toFixed(2)} (>1.0). Excess Inflow=${excessInflow.toFixed(2)}. Reward tambahan = ${rewardTambahan.toFixed(2)} (0.25% dari excess inflow)`);
+      }
+    } else {
+      Logger.log(`Marketing ${name}: Kinerja ${kinerja.toFixed(2)} (<=1.0). Tidak ada reward tambahan.`);
     }
 
     let totalKomisiPerMarketing = komisiFeeKreditCair + rewardTambahan;
@@ -426,17 +556,17 @@ function calculateGajiKomisi(marketingPerformance) {
 
     performanceData.push({
       name: name,
-      performance: kinerja, // Sebagai desimal, misal 0.85 untuk 85%
+      performance: kinerja, // Tetap sebagai desimal (0.85, 1.0, 1.25)
       commission: totalKomisiPerMarketing,
       inflow: pencapaianInflow,
       target: target,
-      totalProspect: data.totalProspect || 0 // Include totalProspect here
+      totalProspect: data.totalProspect || 0
     });
 
     gajiKomisiData.push({
       name: name,
       gajiKontrakAwal: data.gajiKontrakAwal,
-      kinerja: kinerja,
+      kinerja: kinerja, // Tetap sebagai desimal
       gajiFinal: gajiFinal,
       feeMarketingCair: komisiFeeKreditCair,
       rewardTambahan: rewardTambahan,
@@ -445,7 +575,6 @@ function calculateGajiKomisi(marketingPerformance) {
     });
   }
   Logger.log(`[END] calculateGajiKomisi. Final totalGajiKeseluruhan: ${totalGajiKeseluruhan}, totalKomisiKeseluruhan: ${totalKomisiKeseluruhan}`);
-  // Sort performanceData by performance in descending order for main table display
   performanceData.sort((a, b) => b.performance - a.performance);
 
   return { performanceData, gajiKomisiData, totalGajiKeseluruhan, totalKomisiKeseluruhan };
@@ -503,12 +632,13 @@ function prepareChartData(performanceData, marketingPerformance) {
 
   Logger.log(`[END] prepareChartData. Top 5 Kinerja: ${JSON.stringify(top5Kinerja)}`);
 
+
   return {
     top5Kinerja: { labels: top5Kinerja.map(d => d.label), values: top5Kinerja.map(d => d.value) },
     bottom5Kinerja: { labels: bottom5Kinerja.map(d => d.label), values: bottom5Kinerja.map(d => d.value) },
     top5Growth: { labels: top5Growth.map(d => d.label), values: top5Growth.map(d => d.value) },
     negativeGrowth: negativeGrowthList,
-    growthVsTarget: growthVsTargetData
+    growthVsTarget: growthVsTargetData,
   };
 }
 
@@ -583,7 +713,9 @@ function getDefaultDashboardData() {
     bottom5Kinerja: { labels: [], values: [] },
     top5Growth: { labels: [], values: [] },
     negativeGrowth: [],
-    growthVsTarget: { labels: [], growth: [], target: [] }
+    growthVsTarget: { labels: [], growth: [], target: [] },
+    absensiData: [],
+    absensiDailyData: []
   };
 }
 
@@ -611,4 +743,166 @@ function getSumOfOutflow(marketingPerformance) {
     sum += marketingPerformance[name].outflow;
   }
   return sum;
+}
+
+function getAbsensiData(startDate, endDate) {
+  Logger.log(`Processing Absensi Data for ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}`);
+
+  const ssAbsensi = SpreadsheetApp.openById(SPREADSHEET_ABSENSI_ID);
+  const sheetAbsensi = ssAbsensi.getSheetByName(ABSENSI_SHEET_NAME);
+
+  if (!sheetAbsensi) {
+    Logger.log(`Sheet '${ABSENSI_SHEET_NAME}' tidak ditemukan di Spreadsheet Absensi.`);
+    return [];
+  }
+
+  const dataRange = sheetAbsensi.getDataRange();
+  const values = dataRange.getValues();
+
+  if (values.length < 2) {
+    Logger.log("Tidak ada data absensi yang ditemukan.");
+    return [];
+  }
+
+  const headers = values[0];
+  const timestampCol = headers.indexOf('Timestamp');
+  const namaMarketingCol = headers.indexOf('NAMA MARKETING');
+
+  if (timestampCol === -1 || namaMarketingCol === -1) {
+    Logger.log("Kolom 'Timestamp' atau 'NAMA MARKETING' tidak ditemukan.");
+    return [];
+  }
+
+  const absensiByMarketing = {};
+
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    const timestamp = row[timestampCol];
+    const marketingName = row[namaMarketingCol];
+
+    // Pastikan timestamp adalah objek Date dan dalam rentang tanggal
+    if (timestamp instanceof Date && timestamp >= startDate && timestamp <= endDate) {
+      // --- PERUBAHAN DI SINI: HAPUS KONDISI FILTER selectedMarketing ---
+      // Data absensi akan dihitung untuk setiap marketing yang ditemukan dalam rentang tanggal.
+      if (!absensiByMarketing[marketingName]) {
+        absensiByMarketing[marketingName] = {
+          totalKunjungan: 0,
+          hariKerja: new Set()
+        };
+      }
+
+      absensiByMarketing[marketingName].totalKunjungan++;
+
+      const dateKey = Utilities.formatDate(timestamp, SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone(), 'yyyy-MM-dd');
+      absensiByMarketing[marketingName].hariKerja.add(dateKey);
+    }
+  }
+
+  const result = [];
+  for (const name in absensiByMarketing) {
+    const data = absensiByMarketing[name];
+    const jumlahHariKerja = data.hariKerja.size;
+    const totalKunjungan = data.totalKunjungan;
+    const rataRataKunjungan = jumlahHariKerja > 0 ? (totalKunjungan / jumlahHariKerja).toFixed(2) : 0;
+    const presentase = (jumlahHariKerja / 25) * 100;
+
+    result.push({
+      name: name,
+      jumlahHariKerja: jumlahHariKerja,
+      totalKunjungan: totalKunjungan,
+      rataRataKunjungan: parseFloat(rataRataKunjungan),
+      presentase: presentase,
+    });
+  }
+
+  result.sort((a, b) => a.name.localeCompare(b.name));
+
+  Logger.log("Absensi Data Result: " + JSON.stringify(result));
+  return result;
+}
+
+/**
+ * Mengambil dan memproses data absensi harian secara detail.
+ * Mengembalikan semua entri dalam rentang tanggal, tidak mengelompokkan per marketing.
+ *
+ * @param {Date} startDate Tanggal awal periode.
+ * @param {Date} endDate Tanggal akhir periode.
+ * @returns {Array<Object>} Array objek data absensi harian yang terperinci.
+ */
+function getAbsensiDailyData(startDate, endDate, selectedMarketing) {
+  Logger.log(`Processing Absensi Daily Data from ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}`);
+
+  const ssAbsensi = SpreadsheetApp.openById(SPREADSHEET_ABSENSI_ID);
+  const sheetAbsensi = ssAbsensi.getSheetByName(ABSENSI_SHEET_NAME);
+
+  if (!sheetAbsensi) {
+    Logger.log(`Sheet '${ABSENSI_SHEET_NAME}' tidak ditemukan di Spreadsheet Absensi.`);
+    return [];
+  }
+
+  const dataRange = sheetAbsensi.getDataRange();
+  const values = dataRange.getValues();
+
+  if (values.length < 2) { // Baris header + minimal 1 baris data
+    Logger.log("Tidak ada data absensi harian yang ditemukan.");
+    return [];
+  }
+
+  const headers = values[0];
+  const timestampCol = headers.indexOf('Timestamp');
+  const namaMarketingCol = headers.indexOf('NAMA MARKETING');
+  const namaAnggotaCalonAnggotaCol = headers.indexOf('NAMA ANGGOTA / CALON ANGGOTA'); // Pastikan ini PERSIS sama
+  const alamatCol = headers.indexOf('ALAMAT');
+  const fuViaCol = headers.indexOf('FOLLOW UP VIA');
+  const keteranganCol = headers.indexOf('KETERANGAN');
+  const hasilKunjunganCol = headers.indexOf('HASIL KUNJUNGAN'); // Pastikan ini PERSIS sama
+
+  if (timestampCol === -1 || namaMarketingCol === -1 ||
+    namaAnggotaCalonAnggotaCol === -1 || alamatCol === -1 ||
+    fuViaCol === -1 || keteranganCol === -1 || hasilKunjunganCol === -1) {
+    Logger.log("Satu atau lebih kolom yang diperlukan untuk laporan absensi harian tidak ditemukan.");
+    Logger.log(`Headers found: ${headers.join(', ')}`);
+    Logger.log(`Missing checks: Timestamp=${timestampCol === -1}, NAMA MARKETING=${namaMarketingCol === -1}, NAMA ANGGOTA / CALON ANGGOTA=${namaAnggotaCalonAnggotaCol === -1}, ALAMAT=${alamatCol === -1}, FOLLOW UP VIA=${fuViaCol === -1}, KETERANGAN=${keteranganCol === -1}, HASIL KUNJUNGAN=${hasilKunjunganCol === -1}`);
+    return [];
+  }
+
+  const result = []; // Inisialisasi array untuk menyimpan semua baris data
+
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+    const timestamp = row[timestampCol];
+    const marketingName = row[namaMarketingCol];
+
+    // Pastikan timestamp adalah objek Date dan dalam rentang tanggal
+    if (timestamp instanceof Date && timestamp >= startDate && timestamp <= endDate) {
+      // Filter berdasarkan marketing yang dipilih jika bukan 'All'
+      if (selectedMarketing === 'All' || marketingName === selectedMarketing) {
+        result.push({
+          name: marketingName,
+          tanggal: Utilities.formatDate(timestamp, SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone(), 'dd-MM-yyyy HH:mm'),
+          namaAnggotaCalonAnggota: row[namaAnggotaCalonAnggotaCol] || '',
+          alamat: row[alamatCol] || '',
+          fuVia: row[fuViaCol] || '',
+          keterangan: row[keteranganCol] || '',
+          hasilKunjungan: row[hasilKunjunganCol] || ''
+        });
+      }
+    }
+  }
+
+  // Mengurutkan berdasarkan tanggal, dari yang paling awal ke paling akhir
+  // Jika ada data dengan tanggal yang sama, bisa diurutkan berdasarkan nama marketing
+  result.sort((a, b) => {
+    const dateA = new Date(a.tanggal.replace(/(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})/, '$3-$2-$1T$4:$5:00')); // Konversi ke format Date yang bisa di-sort
+    const dateB = new Date(b.tanggal.replace(/(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})/, '$3-$2-$1T$4:$5:00'));
+
+    if (dateA.getTime() !== dateB.getTime()) {
+      return dateA.getTime() - dateB.getTime();
+    }
+    return a.name.localeCompare(b.name); // Jika tanggal sama, urutkan berdasarkan nama
+  });
+
+  Logger.log("Absensi Daily Data Result (first 5): " + JSON.stringify(result.slice(0, 5)));
+  Logger.log("Absensi Daily Data Result (total items): " + result.length);
+  return result;
 }
