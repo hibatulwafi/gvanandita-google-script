@@ -1,14 +1,16 @@
-// --- Global Constants (Konstanta Global) ---
-/** Spreadsheet Data Master */
+// =============================================================================
+// KONSTANTA GLOBAL - SESUAIKAN DENGAN ID DAN NAMA SHEET ANDA
+// =============================================================================
 const SPREADSHEET_ID = '1eZxURW6yArfKbksTBQ_3fAKfcwS4m9drArefsuiYRdU';
-const DATA_MASTER_SHEET_NAME = 'MASTER LENDING';
-const MASTER_KARYAWAN_SHEET_NAME = 'MASTER KARYAWAN';
-
-/** Spreadsheet Absensi */
 const SPREADSHEET_ABSENSI_ID = '1MwDFnkUBDbAhSKqW4Y_dRTuivZdX-TCqmfviC4xcJN0';
-const ABSENSI_SHEET_NAME = 'Form Responses 1';
 
-// --- Web App Entry Point ---
+const DATA_MASTER_SHEET_NAME = 'MASTER LENDING'; // Nama sheet master data pinjaman
+const MASTER_KARYAWAN_SHEET_NAME = 'MASTER KARYAWAN'; // Nama sheet master data karyawan/marketing
+const ABSENSI_SHEET_NAME = 'Form Responses 1'; // Nama sheet Absensi (sesuai image_921002.jpg)
+
+// =============================================================================
+// WEB APP ENTRY POINT
+// =============================================================================
 function doGet() {
   return HtmlService.createTemplateFromFile('Index')
     .evaluate()
@@ -20,13 +22,14 @@ function include(filename) {
     .getContent();
 }
 
-// --- Public Functions (Dipanggil dari Frontend/HTML) ---
+// =============================================================================
+// FUNCTION UNTUK GET MARKETING AKTIF
+// =============================================================================
 
 /**
- * Fungsi untuk mendapatkan semua nama marketing aktif dari MASTER KARYAWAN.
- * Dipanggil oleh HTML untuk mengisi filter marketing.
  * @returns {string[]} Array of marketing names.
  */
+
 function getAllMarketingNames() {
   Logger.log('Memulai getAllMarketingNames');
   try {
@@ -65,16 +68,21 @@ function getAllMarketingNames() {
   }
 }
 
+// =============================================================================
+// FUNGSI UTAMA DASHBOARD
+// =============================================================================
+
 /**
- * Fungsi utama untuk mendapatkan data dashboard berdasarkan filter.
  * @param {number} month Bulan yang dipilih (1-12).
  * @param {number} year Tahun yang dipilih.
  * @param {string} selectedMarketingParam Nama marketing yang dipilih, atau "All".
  * @param {string} periodType Tipe periode ('monthly' atau 'weekly').
  * @param {number} weekNumber Nomor minggu (jika periodType 'weekly').
  * @param {number} weeklyYear Tahun untuk nomor minggu (jika periodType 'weekly').
- * @returns {Object} Objek berisi ringkasan, data performa, dan data grafik.
+ * @returns {Object} Objek berisi ringkasan, data performa marketing, data gaji/komisi,
+ * data performa recruiter, data grafik, absensi, dan detail pinjaman.
  */
+
 function getDashboardData(month, year, selectedMarketingParam, periodType, weekNumber, weeklyYear) {
   Logger.log(`[START] getDashboardData with params: month=${month}, year=${year}, selectedMarketingParam=${selectedMarketingParam}, periodType=${periodType}, weekNumber=${weekNumber}, weeklyYear=${weeklyYear}`);
 
@@ -82,14 +90,17 @@ function getDashboardData(month, year, selectedMarketingParam, periodType, weekN
   const lendingSheet = ss.getSheetByName(DATA_MASTER_SHEET_NAME);
   const karyawanSheet = ss.getSheetByName(MASTER_KARYAWAN_SHEET_NAME);
 
+  // Memastikan sheet yang dibutuhkan ada
   if (!lendingSheet || !karyawanSheet) {
-    Logger.log("Spreasheet 'MASTER LENDING' or 'MASTER KARYAWAN' not found. Returning default data.");
+    Logger.log("Spreadsheet 'MASTER LENDING' or 'MASTER KARYAWAN' not found. Returning default data.");
     return getDefaultDashboardData();
   }
 
+  // Mengambil semua data dari sheet
   const lendingRows = lendingSheet.getDataRange().getDisplayValues();
   const karyawanRows = karyawanSheet.getDataRange().getDisplayValues();
 
+  // Memastikan sheet tidak kosong (minimal ada header dan 1 baris data)
   if (lendingRows.length <= 1 || karyawanRows.length <= 1) {
     Logger.log('One or both sheets are empty or only contain headers. Returning default data.');
     return getDefaultDashboardData();
@@ -98,81 +109,194 @@ function getDashboardData(month, year, selectedMarketingParam, periodType, weekN
   const lendingHeader = lendingRows[0];
   const karyawanHeader = karyawanRows[0];
 
-  const lendingColMap = createHeaderMap(lendingHeader, DATA_MASTER_SHEET_NAME, ["TANGGAL PENCAIRAN", "MARKETING", "STATUS", "PINJAMAN DITERIMA", "FEE MARKETING", "PLAFON DIAJUKAN"]);
-  const karyawanColMap = createHeaderMap(karyawanHeader, MASTER_KARYAWAN_SHEET_NAME, ["NAMA", "TARGET", "PENAWARAN GAJI", "STATUS"]);
+  // Membuat peta header untuk mempermudah akses kolom berdasarkan nama
+  const lendingColMap = createHeaderMap(lendingHeader, DATA_MASTER_SHEET_NAME, [
+    "TANGGAL PENCAIRAN", "MARKETING", "STATUS", "PINJAMAN DITERIMA",
+    "FEE MARKETING", "PLAFON DIAJUKAN", "CHANNEL INCOME", "RECRUITER", "FEE RECRUITER"
+  ]);
+  const karyawanColMap = createHeaderMap(karyawanHeader, MASTER_KARYAWAN_SHEET_NAME, [
+    "NAMA", "TARGET", "PENAWARAN GAJI", "STATUS"
+  ]);
 
+  // Menginisialisasi struktur data untuk performa marketing berdasarkan data karyawan
   const initialMarketingPerformance = initializeMarketingPerformance(karyawanRows, karyawanColMap);
-  let activeMarketersCount = Object.keys(initialMarketingPerformance).length;
+  // Menghitung jumlah marketing aktif (tidak termasuk 'All' jika ada)
+  let activeMarketersCount = Object.keys(initialMarketingPerformance).length - 1;
+  if (activeMarketersCount < 0) activeMarketersCount = 0;
 
-  // Filter data lending dan hitung total prospek/closing serta prospek per marketing
+  // --- 1. Hitung Periode Waktu Saat Ini ---
+  // Menentukan tanggal mulai dan akhir untuk periode yang dipilih (bulanan atau mingguan)
+  let currentStartDate, currentEndDate;
+  if (periodType === 'monthly') {
+    currentStartDate = new Date(year, month - 1, 1);
+    currentEndDate = new Date(year, month, 0); // Hari terakhir bulan sekarang
+  } else { // weekly
+    const date = new Date(weeklyYear, 0, 1 + (weekNumber - 1) * 7);
+    const day = date.getDay(); // 0: Minggu, 1: Senin, dst.
+    const diff = date.getDate() - day + (day === 0 ? -6 : 1); // Mendapatkan tanggal Senin dari minggu tersebut
+    currentStartDate = new Date(date.setDate(diff));
+    currentEndDate = new Date(currentStartDate);
+    currentEndDate.setDate(currentStartDate.getDate() + 6); // Mendapatkan tanggal Minggu dari minggu tersebut
+  }
+  currentStartDate.setHours(0, 0, 0, 0); // Atur waktu ke awal hari
+  currentEndDate.setHours(23, 59, 59, 999); // Atur waktu ke akhir hari
+  Logger.log(`Current Period: ${currentStartDate.toDateString()} - ${currentEndDate.toDateString()}`);
+
+  // --- 2. Hitung Periode Waktu Sebelumnya ---
+  // Menentukan tanggal mulai dan akhir untuk periode sebelumnya (untuk perhitungan growth)
+  let prevMonth, prevYear, prevWeekNumber, prevWeeklyYear;
+  let prevStartDate, prevEndDate;
+
+  if (periodType === 'monthly') {
+    prevMonth = month - 1;
+    prevYear = year;
+    if (prevMonth === 0) { // Jika bulan saat ini Januari, periode sebelumnya adalah Desember tahun lalu
+      prevMonth = 12;
+      prevYear = year - 1;
+    }
+    prevStartDate = new Date(prevYear, prevMonth - 1, 1);
+    prevEndDate = new Date(prevYear, prevMonth, 0);
+  } else { // weekly
+    // Untuk minggu sebelumnya, cukup kurangi 7 hari dari startDate periode saat ini
+    prevStartDate = new Date(currentStartDate);
+    prevStartDate.setDate(currentStartDate.getDate() - 7);
+    prevEndDate = new Date(prevStartDate);
+    prevEndDate.setDate(prevStartDate.getDate() + 6);
+
+    // Update weekNumber dan weeklyYear untuk logging/debugging
+    prevWeekNumber = Utilities.formatDate(prevStartDate, Session.getScriptTimeZone(), 'w');
+    prevWeeklyYear = prevStartDate.getFullYear();
+  }
+  prevStartDate.setHours(0, 0, 0, 0);
+  prevEndDate.setHours(23, 59, 59, 999);
+  Logger.log(`Previous Period: ${prevStartDate.toDateString()} - ${prevEndDate.toDateString()}`);
+
+  // --- 3. Proses Data untuk Periode Saat Ini (current data) ---
+  // Filter data pinjaman berdasarkan rentang tanggal saat ini dan parameter marketing/periode
   const { filteredLendingRows, totalProspectCount, totalClosingCount, marketingSpecificCounts } = filterLendingData(
-    lendingRows, lendingColMap, month, year, selectedMarketingParam, periodType, weekNumber, weeklyYear
+    lendingRows, lendingColMap, month, year, selectedMarketingParam, periodType, weekNumber, weeklyYear, currentStartDate, currentEndDate
   );
 
-  // Buat salinan marketingPerformance untuk perhitungan inflow/outflow
-  let marketingPerformance = JSON.parse(JSON.stringify(initialMarketingPerformance));
+  // Inisialisasi objek untuk mengakumulasi performa marketing dan recruiter untuk periode saat ini
+  let marketingPerformance = JSON.parse(JSON.stringify(initialMarketingPerformance)); // Clone agar tidak memodifikasi initial
+  let recruiterPerformance = {}; // BARU: Inisialisasi objek untuk menyimpan data komisi recruiter
 
-  // Agregasi data inflow/outflow dari baris yang difilter ke marketingPerformance
-  aggregateLendingData(filteredLendingRows, lendingColMap, marketingPerformance);
+  // Agregasi data pinjaman yang sudah difilter ke dalam objek performa marketing dan recruiter
+  aggregateLendingData(filteredLendingRows, lendingColMap, marketingPerformance, recruiterPerformance);
 
-  // Update totalProspect per marketing dari marketingSpecificCounts
+  // Memperbarui total prospek per marketing dari hasil filter
   for (const marketerName in marketingSpecificCounts) {
     if (marketingPerformance[marketerName]) {
       marketingPerformance[marketerName].totalProspect = marketingSpecificCounts[marketerName].totalProspect || 0;
     }
   }
 
-  // Hitung total keseluruhan target dari semua marketing aktif
+  // Menghitung total inflow, outflow, dan calculated income untuk periode saat ini
+  const currentPeriodInflow = getSumOfInflow(marketingPerformance);
+  const currentPeriodOutflow = getSumOfOutflow(marketingPerformance); // Mungkin tidak digunakan di summary, tapi relevan untuk Gross Profit
+  const currentPeriodNewCalculatedIncome = getSumOfNewCalculatedIncome(marketingPerformance);
+
+  // --- 4. Proses Data untuk Periode Sebelumnya (previous data) ---
+  // Filter data pinjaman untuk periode sebelumnya untuk menghitung pertumbuhan (growth)
+  const { filteredLendingRows: prevFilteredLendingRows } = filterLendingData(
+    lendingRows, lendingColMap, prevMonth, prevYear, selectedMarketingParam, periodType, prevWeekNumber, prevWeeklyYear, prevStartDate, prevEndDate
+  );
+
+  let previousPeriodInflow = 0;
+  // Asumsi inflow adalah PINJAMAN DITERIMA untuk status 'approve' atau 'claimed'
+  const validClosingStatuses = ['simulasi', 'approve', 'claimed'];
+  const pinjamanDiterimaColIdx = lendingColMap['PLAFON DIAJUKAN'];
+  // const pinjamanDiterimaColIdx = lendingColMap['PINJAMAN DITERIMA'];
+  const statusColIdx = lendingColMap['STATUS'];
+
+  for (const row of prevFilteredLendingRows) {
+    const pinjaman = parseNumber(row[pinjamanDiterimaColIdx]);
+    const status = (row[statusColIdx] || '').toString().trim().toLowerCase();
+    if (validClosingStatuses.includes(status)) {
+      previousPeriodInflow += pinjaman;
+    }
+  }
+  Logger.log(`Previous Period Inflow: ${previousPeriodInflow}`);
+
+  // --- Hitung Total Overall Target ---
+  // Menjumlahkan target dari semua marketing aktif (tidak termasuk 'All')
   let totalOverallTarget = 0;
   for (const marketerName in initialMarketingPerformance) {
-    totalOverallTarget += initialMarketingPerformance[marketerName].target;
+    if (marketerName !== 'All') {
+      totalOverallTarget += initialMarketingPerformance[marketerName].target;
+    }
   }
 
-  // Hitung gaji dan komisi
+  // Menghitung gaji dan komisi untuk marketing berdasarkan performa periode saat ini
   const { performanceData, gajiKomisiData, totalGajiKeseluruhan, totalKomisiKeseluruhan } = calculateGajiKomisi(
     marketingPerformance
   );
 
-  // Siapkan data untuk grafik
+  // --- PANGGIL FUNGSI BARU UNTUK POTENSI PENDAPATAN DI SINI ---
+  const potensiPendapatanData = getPotensiPendapatanData(
+    lendingRows,
+    lendingColMap,
+    initialMarketingPerformance,
+    currentStartDate, // Gunakan currentStartDate dan currentEndDate
+    currentEndDate,
+    selectedMarketingParam // Pastikan filter marketing juga diterapkan
+  );
+
+  // Menyiapkan data untuk grafik kinerja marketing
   const chartData = prepareChartData(performanceData, marketingPerformance);
 
-  // --- Start: Bagian baru untuk Absensi Data ---
-  let startDate, endDate;
+  // --- Bagian untuk Absensi Data ---
+  // Mengambil data absensi untuk periode saat ini
+  const absensiData = getAbsensiData(currentStartDate, currentEndDate); // Data summary/aggregated
+  const absensiDailyData = getAbsensiDailyData(currentStartDate, currentEndDate, 'All'); // Data harian, 'All' berarti semua marketing
 
-  if (periodType === 'monthly') {
-    startDate = new Date(year, month - 1, 1);
-    endDate = new Date(year, month, 0); // Hari terakhir bulan sebelumnya
-  } else { // weekly
-    const date = new Date(weeklyYear, 0, 1 + (weekNumber - 1) * 7);
-    const day = date.getDay();
-    const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-    startDate = new Date(date.setDate(diff));
-    endDate = new Date(startDate);
-    endDate.setDate(startDate.getDate() + 6);
+  // --- Perhitungan Summary Akhir ---
+  // Menghitung closing rate, gross profit, net profit, dan total growth
+  let closingRate = 0;
+  if (totalProspectCount > 0) {
+    closingRate = (totalClosingCount / totalProspectCount) * 100;
   }
-  const debugStartDate = new Date('2025-07-01T00:00:00Z');
-  const debugEndDate = new Date('2025-07-31T23:59:59Z');
 
-  const absensiData = getAbsensiData(startDate, endDate);
-  const absensiDailyData = getAbsensiDailyData(debugStartDate, debugEndDate, 'All');
+  let totalKomisiRecruiter = 0;
+  for (const recruiterName in recruiterPerformance) {
+    if (recruiterPerformance.hasOwnProperty(recruiterName)) {
+      totalKomisiRecruiter += recruiterPerformance[recruiterName].totalKomisi || 0;
+    }
+  }
 
+  const grossProfit = currentPeriodNewCalculatedIncome;
+  const netProfit = grossProfit - totalGajiKeseluruhan - totalKomisiRecruiter;
+  // const netProfit = grossProfit - totalGajiKeseluruhan - totalKomisiKeseluruhan - totalKomisiRecruiter;
+  const totalGrowth = currentPeriodInflow - previousPeriodInflow; // Perbandingan inflow saat ini dengan sebelumnya
+  Logger.log(`Current Inflow: ${currentPeriodInflow}, Previous Inflow: ${previousPeriodInflow}, Total Growth: ${totalGrowth}`);
+
+
+  // Objek ringkasan yang akan ditampilkan di kartu dashboard
   const summary = {
-    totalGrowth: marketingPerformance.hasOwnProperty('All') ? marketingPerformance['All'].inflow - marketingPerformance['All'].outflow : 0,
-    overallTargetPercentage: totalOverallTarget > 0 ? (getSumOfInflow(marketingPerformance) / totalOverallTarget) * 100 : 0,
-    totalInflow: getSumOfInflow(marketingPerformance),
-    totalOutflow: getSumOfOutflow(marketingPerformance),
+    totalGrowth: totalGrowth,
+    overallTargetPercentage: totalOverallTarget > 0 ? (currentPeriodInflow / totalOverallTarget) * 100 : 0,
+    totalInflow: currentPeriodInflow,
     totalGaji: totalGajiKeseluruhan,
-    totalKomisi: totalKomisiKeseluruhan,
+    totalKomisi: totalKomisiKeseluruhan + totalKomisiRecruiter,
     activeMarketers: activeMarketersCount,
     totalProspect: totalProspectCount,
     totalClosing: totalClosingCount,
-    totalTarget: totalOverallTarget
+    totalTarget: totalOverallTarget,
+    closingRate: closingRate,
+    grossProfit: grossProfit,
+    netProfit: netProfit,
+    newCalculatedIncome: currentPeriodNewCalculatedIncome
   };
 
+  // Mendapatkan data detail pinjaman untuk tampilan tabel di frontend
+  const detailPinjamanData = getDetailPinjamanData(month, year, selectedMarketingParam, periodType, weekNumber, weeklyYear);
+
+  // Objek hasil akhir yang akan dikembalikan ke frontend
   const result = {
     summary: summary,
     performanceData: performanceData,
     gajiKomisiData: gajiKomisiData,
+    recruiterPerformance: recruiterPerformance,
     top5Kinerja: chartData.top5Kinerja,
     bottom5Kinerja: chartData.bottom5Kinerja,
     top5Growth: chartData.top5Growth,
@@ -180,102 +304,27 @@ function getDashboardData(month, year, selectedMarketingParam, periodType, weekN
     growthVsTarget: chartData.growthVsTarget,
     absensiData: absensiData,
     absensiDailyData: absensiDailyData,
-    reportStartDate: startDate.getTime(),
-    reportEndDate: endDate.getTime()
+    detailPinjamanData: detailPinjamanData,
+    reportStartDate: currentStartDate.getTime(),
+    reportEndDate: currentEndDate.getTime(),
+    potensiPendapatanData: potensiPendapatanData
   };
 
+  // Logging hasil untuk debugging
+  Logger.log("[END] getDashboardData. Returning object (excerpt summary): " + JSON.stringify(result.summary));
   Logger.log("[END] getDashboardData. Returning object (excerpt performanceData): " + JSON.stringify(result.performanceData.slice(0, 5)));
   Logger.log("[END] getDashboardData. Returning object (excerpt gajiKomisiData): " + JSON.stringify(result.gajiKomisiData.slice(0, 5)));
+  Logger.log("[END] getDashboardData. Returning object (excerpt recruiterPerformance): " + JSON.stringify(result.recruiterPerformance)); // Log data recruiter
   Logger.log("[END] getDashboardData. Returning object (excerpt absensiData): " + JSON.stringify(result.absensiData.slice(0, 5)));
   Logger.log("[END] getDashboardData. Returning object (excerpt absensiDailyData): " + JSON.stringify(result.absensiDailyData.slice(0, 5)));
-
+  Logger.log("[END] getDashboardData. Returning object (excerpt detailPinjamanData): " + JSON.stringify(result.detailPinjamanData.slice(0, 5)));
 
   return result;
 }
 
-/**
- * Menghitung total inflow untuk periode waktu sebelumnya.
- *
- * @param {number} currentMonth Bulan saat ini (1-12).
- * @param {number} currentYear Tahun saat ini.
- * @param {string} periodType Tipe periode ('monthly' atau 'weekly').
- * @param {number} currentWeekNumber Nomor minggu saat ini (1-52/53).
- * @param {number} currentWeeklyYear Tahun minggu saat ini.
- * @returns {number} Total inflow dari periode sebelumnya.
- */
-function getPreviousPeriodInflow(currentMonth, currentYear, periodType, currentWeekNumber, currentWeeklyYear) {
-  let prevStartDate, prevEndDate;
-
-  if (periodType === 'monthly') {
-    let prevMonth = currentMonth - 1;
-    let prevYear = currentYear;
-    if (prevMonth === 0) { // Jika bulan saat ini Januari (1), periode sebelumnya adalah Desember tahun lalu
-      prevMonth = 12;
-      prevYear--;
-    }
-    prevStartDate = new Date(prevYear, prevMonth - 1, 1);
-    prevEndDate = new Date(prevYear, prevMonth, 0); // Hari terakhir bulan sebelumnya
-    prevEndDate.setHours(23, 59, 59, 999);
-  } else { // weekly
-    // Hitung tanggal mulai minggu sebelumnya
-    const currentWeekStart = new Date(currentWeeklyYear, 0, 1 + (currentWeekNumber - 1) * 7);
-    const day = currentWeekStart.getDay();
-    const diff = currentWeekStart.getDate() - day + (day === 0 ? -6 : 1); // Senin minggu ini
-    currentWeekStart.setDate(diff); // Set ke Senin minggu ini
-
-    prevStartDate = new Date(currentWeekStart);
-    prevStartDate.setDate(currentWeekStart.getDate() - 7); // Kurangi 7 hari untuk Senin minggu lalu
-    prevStartDate.setHours(0, 0, 0, 0);
-
-    prevEndDate = new Date(prevStartDate);
-    prevEndDate.setDate(prevStartDate.getDate() + 6); // Minggu lalu berakhir 6 hari setelah prevStartDate
-    prevEndDate.setHours(23, 59, 59, 999);
-  }
-
-  Logger.log(`Calculating Previous Period Inflow for: ${prevStartDate.toLocaleDateString()} to ${prevEndDate.toLocaleDateString()}`);
-
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  const lendingSheet = ss.getSheetByName(DATA_MASTER_SHEET_NAME);
-
-  if (!lendingSheet) {
-    Logger.log(`Sheet '${DATA_MASTER_SHEET_NAME}' not found.`);
-    return 0;
-  }
-
-  const lendingRows = lendingSheet.getDataRange().getDisplayValues();
-  if (lendingRows.length <= 1) {
-    return 0;
-  }
-
-  const lendingHeader = lendingRows[0];
-  const lendingColMap = createHeaderMap(lendingHeader, DATA_MASTER_SHEET_NAME, ["TANGGAL PENCAIRAN", "PINJAMAN DITERIMA"]);
-
-  const tanggalPencairanCol = lendingColMap["TANGGAL PENCAIRAN"];
-  const pinjamanDiterimaCol = lendingColMap["PINJAMAN DITERIMA"];
-
-  if (tanggalPencairanCol === -1 || pinjamanDiterimaCol === -1) {
-    Logger.log("Kolom 'TANGGAL PENCAIRAN' atau 'PINJAMAN DITERIMA' tidak ditemukan di sheet lending.");
-    return 0;
-  }
-
-  let previousInflow = 0;
-
-  for (let i = 1; i < lendingRows.length; i++) {
-    const row = lendingRows[i];
-    const tanggalPencairan = new Date(row[tanggalPencairanCol]);
-    const pinjamanDiterima = parseFloat(String(row[pinjamanDiterimaCol]).replace(/\./g, '').replace(/,/g, '.')); // Handle IDR format
-
-    if (!isNaN(tanggalPencairan.getTime()) && tanggalPencairan >= prevStartDate && tanggalPencairan <= prevEndDate) {
-      if (!isNaN(pinjamanDiterima)) {
-        previousInflow += pinjamanDiterima;
-      }
-    }
-  }
-  Logger.log(`Previous Period Inflow: ${previousInflow}`);
-  return previousInflow;
-}
-
-// --- Helper Functions (Fungsi Pembantu) ---
+// =============================================================================
+// FUNGSI PEMBANTU
+// =============================================================================
 
 /**
  * Mengembalikan objek map header ke index kolom.
@@ -341,11 +390,13 @@ function initializeMarketingPerformance(masterKaryawanRawData, karyawanColMap) {
         inflow: 0,
         outflow: 0,
         feeMarketingCair: 0,
-        totalProspect: 0, // NEW: For storing prospect count per marketer
+        totalProspect: 0,
+        totalClosing: 0,
         target: target,
         gajiKontrakAwal: gajiKontrak,
         totalGaji: 0,
-        totalKomisi: 0
+        totalKomisi: 0,
+        newCalculatedIncome: 0
       };
     }
   }
@@ -372,11 +423,11 @@ function filterLendingData(masterLendingRawData, lendingColMap, month, year, sel
   let totalProspectCount = 0;
   const marketingSpecificCounts = {}; // NEW: Object to store prospect count per marketing
 
-  const colLendingTanggalPencairan = lendingColMap['TANGGAL PENCAIRAN'];
+  const colLendingTanggalPencairan = lendingColMap['TANGGAL PENGAJUAN'];
   const colLendingMarketingName = lendingColMap['MARKETING'];
   const colLendingStatus = lendingColMap['STATUS'];
 
-  const validClosingStatuses = ['approve', 'claimed'];
+  const validClosingStatuses = ['simulasi', 'approve', 'claimed'];
   const validProspectStatuses = ['pending', 'verifikasi', 'survey'];
 
   for (let i = 1; i < masterLendingRawData.length; i++) {
@@ -433,68 +484,123 @@ function filterLendingData(masterLendingRawData, lendingColMap, month, year, sel
   return { filteredLendingRows, totalProspectCount, totalClosingCount, marketingSpecificCounts };
 }
 
-
 /**
- * Mengagregasi data inflow, outflow, dan fee marketing dari baris yang difilter.
- * Memperbarui objek marketingPerformance.
- * @param {Array<Array>} filteredLendingRows Baris data lending yang sudah difilter.
- * @param {Object} lendingColMap Map header to column index for MASTER LENDING.
- * @param {Object} marketingPerformance Objek kinerja marketing yang akan diperbarui.
- * @returns {Object} Objek berisi total inflow global dan total outflow global.
+ * Mengagregasi data pinjaman yang sudah difilter ke objek performa marketing dan recruiter.
+ * Ini menghitung inflow, outflow, fee marketing, income baru, dan komisi recruiter.
+ * @param {Array<Array>} filteredLendingRows - Data pinjaman yang sudah difilter.
+ * @param {Object} lendingColMap - Peta indeks kolom untuk MASTER LENDING.
+ * @param {Object} marketingPerformance - Objek untuk mengakumulasi data marketing (dimodifikasi secara referensi).
+ * @param {Object} recruiterPerformance - Objek untuk mengakumulasi data recruiter (dimodifikasi secara referensi).
  */
-function aggregateLendingData(filteredLendingRows, lendingColMap, marketingPerformance) {
-  let totalInflowGlobal = 0;
-  let totalOutflowGlobal = 0;
-
-  const colLendingPlafonDiajukan = lendingColMap['PLAFON DIAJUKAN'];
-  const colLendingPinjamanDiterima = lendingColMap['PINJAMAN DITERIMA'];
-  const colLendingFeeMarketing = lendingColMap['FEE MARKETING'];
+function aggregateLendingData(filteredLendingRows, lendingColMap, marketingPerformance, recruiterPerformance) {
   const colLendingMarketingName = lendingColMap['MARKETING'];
   const colLendingStatus = lendingColMap['STATUS'];
+  const colLendingPinjamanDiterima = lendingColMap['PLAFON DIAJUKAN'];
+  // const colLendingPinjamanDiterima = lendingColMap['PINJAMAN DITERIMA'];
+  const colLendingFeeMarketing = lendingColMap['FEE MARKETING'];
+  const colLendingPlafonDiajukan = lendingColMap['PLAFON DIAJUKAN'];
+  const colLendingIncome = lendingColMap['CHANNEL INCOME'];
+  const colLendingRecruiterName = lendingColMap['RECRUITER'];
+  const colLendingFeeRecruiter = lendingColMap['FEE RECRUITER'];
 
-  const validClosingStatuses = ['approve', 'claimed'];
+  const validClosingStatuses = ['simulasi', 'approve', 'claimed'];
 
   Logger.log(`Starting aggregateLendingData with ${filteredLendingRows.length} filtered rows.`);
 
   for (const row of filteredLendingRows) {
     const marketingNameInRow = (row[colLendingMarketingName] || '').toString().trim();
     const statusInRow = (row[colLendingStatus] || '').toString().trim().toLowerCase();
+    const pinjamanDiterima = parseNumber(row[colLendingPinjamanDiterima]);
+    const plafonDiajukan = parseNumber(row[colLendingPlafonDiajukan]);
 
-    // Only aggregate inflow and feeMarketingCair for valid closing statuses
-    if (validClosingStatuses.includes(statusInRow)) {
-      const pinjaman = parseNumber(row[colLendingPinjamanDiterima]);
-      const feeMarketingRaw = row[colLendingFeeMarketing];
-      const feePercentage = parseNumber(feeMarketingRaw, true);
+    // Perhitungan New Calculated Income (berdasarkan Kolom Z: INCOME)
+    const incomePercentageRaw = row[colLendingIncome];
+    let incomePercentage = 0;
 
-      const feeMarketingAmount = pinjaman * (feePercentage / 100);
+    if (typeof incomePercentageRaw === 'number') {
+      // Kalau sudah desimal, misal 0.031 → langsung pakai
+      incomePercentage = incomePercentageRaw < 1 ? incomePercentageRaw : incomePercentageRaw / 100;
+    } else if (typeof incomePercentageRaw === 'string') {
+      const cleaned = incomePercentageRaw.replace('%', '').trim();
+      incomePercentage = parseFloat(cleaned) / 100;
+    }
 
-      if (marketingPerformance[marketingNameInRow]) {
-        marketingPerformance[marketingNameInRow].inflow += pinjaman;
+
+    const newCalculatedIncome = pinjamanDiterima * incomePercentage;
+
+    // Perbarui marketingPerformance untuk marketingNameInRow yang ditemukan
+    if (marketingPerformance[marketingNameInRow]) {
+      // Akumulasi newCalculatedIncome ke marketing individual
+      marketingPerformance[marketingNameInRow].newCalculatedIncome += newCalculatedIncome;
+      Logger.log(`Aggregating newCalculatedIncome for ${marketingNameInRow}: +${newCalculatedIncome}. Current total: ${marketingPerformance[marketingNameInRow].newCalculatedIncome}`);
+
+      // Hanya akumulasi inflow, feeMarketingCair, dan totalClosing untuk status yang valid
+      if (validClosingStatuses.includes(statusInRow)) {
+        const feeMarketingRaw = row[colLendingFeeMarketing];
+        const feePercentage = parseNumber(feeMarketingRaw, true); // Pastikan parseNumber bisa handle true untuk persentase jika perlu
+
+        const feeMarketingAmount = pinjamanDiterima * (feePercentage / 100);
+
+        marketingPerformance[marketingNameInRow].inflow += pinjamanDiterima;
         marketingPerformance[marketingNameInRow].feeMarketingCair += feeMarketingAmount;
-        totalInflowGlobal += pinjaman;
-        Logger.log(`Aggregating for ${marketingNameInRow} (Closing): Inflow=${pinjaman}, Fee=${feeMarketingAmount}. Current Inflow for ${marketingNameInRow}: ${marketingPerformance[marketingNameInRow].inflow}`);
-      } else {
-        Logger.log(`Marketing name "${marketingNameInRow}" from lending data not found in MASTER KARYAWAN. Skipping performance aggregation for this closing entry: ${JSON.stringify(row)}`);
+        marketingPerformance[marketingNameInRow].totalClosing++;
+        Logger.log(`Aggregating for ${marketingNameInRow} (Closing): Inflow=${pinjamanDiterima}, Fee=${feeMarketingAmount}. Current Inflow for ${marketingNameInRow}: ${marketingPerformance[marketingNameInRow].inflow}`);
+      }
+
+    } else {
+      Logger.log(`Marketing name "${marketingNameInRow}" from lending data not found in MASTER KARYAWAN. Skipping performance aggregation for row: ${JSON.stringify(row)}`);
+    }
+
+    // Akumulasi juga ke entri 'All' di marketingPerformance (jika sudah diinisialisasi)
+    if (marketingPerformance['All']) {
+      marketingPerformance['All'].newCalculatedIncome += newCalculatedIncome;
+      if (validClosingStatuses.includes(statusInRow)) {
+        marketingPerformance['All'].inflow += pinjamanDiterima;
+        // marketingPerformance['All'].feeMarketingCair += feeMarketingAmount; // Jika Anda melacak total fee marketing cair
+        marketingPerformance['All'].totalClosing++;
       }
     }
 
-    // Outflow (if it represents canceled/rejected loans) - needs specific status
-    // Assuming 'PLAFON DIAJUKAN' is for inflow calculation for now, adjust if it's for outflow
-    // If 'Plafon Diajukan' is always considered, include it here.
-    // const plafon = parseNumber(row[colLendingPlafonDiajukan]);
-    // totalOutflowGlobal += plafon; // Uncomment and adjust if plafon represents outflow
+    // Akumulasi data untuk 'All' marketing
+    if (marketingPerformance['All']) {
+      marketingPerformance['All'].newCalculatedIncome += newCalculatedIncome;
+      if (validClosingStatuses.includes(statusInRow)) {
+        marketingPerformance['All'].inflow += pinjamanDiterima;
+        marketingPerformance['All'].totalClosing++;
+        // marketingPerformance['All'].outflow += plafonDiajukan; // Jika ingin mengakumulasi total outflow untuk 'All'
+      }
+    }
+
+    // --- Logika Perhitungan Komisi Recruiter ---
+    const recruiterNameInRow = (row[colLendingRecruiterName] || '').toString().trim();
+    const feeRecruiterRaw = row[colLendingFeeRecruiter];
+
+    let feeRecruiterPercentage = 0;
+    if (typeof feeRecruiterRaw === 'number') {
+      feeRecruiterPercentage = feeRecruiterRaw;
+    } else {
+      if (feeRecruiterPercentage > 1 && feeRecruiterPercentage <= 100) {
+        feeRecruiterPercentage = feeRecruiterPercentage / 100;
+      } else if (feeRecruiterRaw.toString().includes('%')) {
+        // feeRecruiterPercentage = convertPercentToDecimal(feeRecruiterRaw.toString());
+        feeRecruiterPercentage = parseNumber(feeRecruiterRaw.toString().replace('%', '')) / 10000;
+      }
+    }
+
+    // Komisi Recruiter hanya dihitung jika ada nama recruiter DAN status pinjaman valid closing
+    if (recruiterNameInRow && validClosingStatuses.includes(statusInRow)) {
+      const recruiterCommission = pinjamanDiterima * feeRecruiterPercentage;
+
+      // Inisialisasi jika recruiter belum ada di objek recruiterPerformance
+      if (!recruiterPerformance[recruiterNameInRow]) {
+        recruiterPerformance[recruiterNameInRow] = { totalKomisi: 0 };
+      }
+      recruiterPerformance[recruiterNameInRow].totalKomisi += recruiterCommission;
+      // Logger.log(`Aggregating recruiter commission for ${recruiterNameInRow}: +${recruiterCommission}. Current total: ${recruiterPerformance[recruiterNameInRow].totalKomisi}`);
+    }
   }
-  // This function currently focuses on inflow and fee for marketingPerformance.
-  // totalOutflowGlobal calculation logic might need to be refined based on 'outflow' definition in your sheet.
-  return { totalInflowGlobal, totalOutflowGlobal };
 }
 
-/**
- * Menghitung gaji dan komisi untuk setiap marketing.
- * Memperbarui objek marketingPerformance dengan totalGaji dan totalKomisi.
- * @param {Object} marketingPerformance Objek kinerja marketing yang sudah diperbarui dengan inflow/outflow.
- * @returns {Object} Objek berisi data performa, data gaji/komisi, dan total gaji/komisi keseluruhan.
- */
 /**
  * Menghitung gaji dan komisi untuk setiap marketing.
  * Memperbarui objek marketingPerformance dengan totalGaji dan totalKomisi.
@@ -530,7 +636,7 @@ function calculateGajiKomisi(marketingPerformance) {
 
     // Rule 3: Fee 0.25% dari setiap kredit cair (ini adalah 'FEE MARKETING' di sheet)
     // data.feeMarketingCair sudah dihitung di aggregateLendingData
-    let komisiFeeKreditCair = data.feeMarketingCair; 
+    let komisiFeeKreditCair = data.feeMarketingCair;
     Logger.log(`Marketing ${name}: Komisi Fee Kredit Cair = ${komisiFeeKreditCair.toFixed(2)}`);
 
     // Rule 2: Reward Tambahan 0.25% (diambil dari FEE MARKETING) jika achievement > 100%
@@ -556,11 +662,12 @@ function calculateGajiKomisi(marketingPerformance) {
 
     performanceData.push({
       name: name,
-      performance: kinerja, // Tetap sebagai desimal (0.85, 1.0, 1.25)
+      performance: kinerja * 100, // Tetap sebagai desimal (0.85, 1.0, 1.25) lalu dikali10
       commission: totalKomisiPerMarketing,
       inflow: pencapaianInflow,
       target: target,
-      totalProspect: data.totalProspect || 0
+      totalProspect: data.totalProspect || 0,
+      totalClosing: data.totalClosing || 0,
     });
 
     gajiKomisiData.push({
@@ -575,6 +682,7 @@ function calculateGajiKomisi(marketingPerformance) {
     });
   }
   Logger.log(`[END] calculateGajiKomisi. Final totalGajiKeseluruhan: ${totalGajiKeseluruhan}, totalKomisiKeseluruhan: ${totalKomisiKeseluruhan}`);
+  Logger.log(performanceData);
   performanceData.sort((a, b) => b.performance - a.performance);
 
   return { performanceData, gajiKomisiData, totalGajiKeseluruhan, totalKomisiKeseluruhan };
@@ -642,7 +750,6 @@ function prepareChartData(performanceData, marketingPerformance) {
   };
 }
 
-
 /**
  * Menghitung nomor minggu dalam setahun untuk tanggal yang diberikan.
  * @param {Date} d Objek tanggal.
@@ -688,6 +795,15 @@ function parseNumber(value, isPercentage = false) {
   return 0; // Default to 0 if parsing fails
 }
 
+function convertPercentToDecimal(input) {
+  if (typeof input === 'string' && input.includes('%')) {
+    const numberOnly = parseFloat(input.replace('%', '').trim());
+    if (!isNaN(numberOnly)) {
+      return numberOnly / 100;
+    }
+  }
+  return null; // Jika input tidak valid
+}
 /**
  * Mengembalikan data dashboard default jika terjadi kesalahan atau sheet kosong.
  * @returns {Object} Objek data dashboard default.
@@ -727,7 +843,7 @@ function getDefaultDashboardData() {
 function getSumOfInflow(marketingPerformance) {
   let sum = 0;
   for (const name in marketingPerformance) {
-    sum += marketingPerformance[name].inflow;
+    sum += parseNumber(marketingPerformance[name].inflow);
   }
   return sum;
 }
@@ -740,9 +856,92 @@ function getSumOfInflow(marketingPerformance) {
 function getSumOfOutflow(marketingPerformance) {
   let sum = 0;
   for (const name in marketingPerformance) {
-    sum += marketingPerformance[name].outflow;
+    sum += parseNumber(marketingPerformance[name].outflow);
   }
   return sum;
+}
+
+/**
+ * @param {number} currentMonth Bulan saat ini (1-12).
+ * @param {number} currentYear Tahun saat ini.
+ * @param {string} periodType Tipe periode ('monthly' atau 'weekly').
+ * @param {number} currentWeekNumber Nomor minggu saat ini (1-52/53).
+ * @param {number} currentWeeklyYear Tahun minggu saat ini.
+ * @returns {number} Total inflow dari periode sebelumnya.
+ */
+
+function getPreviousPeriodInflow(currentMonth, currentYear, periodType, currentWeekNumber, currentWeeklyYear) {
+  let prevStartDate, prevEndDate;
+
+  if (periodType === 'monthly') {
+    let prevMonth = currentMonth - 1;
+    let prevYear = currentYear;
+    if (prevMonth === 0) { // Jika bulan saat ini Januari (1), periode sebelumnya adalah Desember tahun lalu
+      prevMonth = 12;
+      prevYear--;
+    }
+    prevStartDate = new Date(prevYear, prevMonth - 1, 1);
+    prevEndDate = new Date(prevYear, prevMonth, 0); // Hari terakhir bulan sebelumnya
+    prevEndDate.setHours(23, 59, 59, 999);
+  } else { // weekly
+    // Hitung tanggal mulai minggu sebelumnya
+    const currentWeekStart = new Date(currentWeeklyYear, 0, 1 + (currentWeekNumber - 1) * 7);
+    const day = currentWeekStart.getDay();
+    const diff = currentWeekStart.getDate() - day + (day === 0 ? -6 : 1); // Senin minggu ini
+    currentWeekStart.setDate(diff); // Set ke Senin minggu ini
+
+    prevStartDate = new Date(currentWeekStart);
+    prevStartDate.setDate(currentWeekStart.getDate() - 7); // Kurangi 7 hari untuk Senin minggu lalu
+    prevStartDate.setHours(0, 0, 0, 0);
+
+    prevEndDate = new Date(prevStartDate);
+    prevEndDate.setDate(prevStartDate.getDate() + 6); // Minggu lalu berakhir 6 hari setelah prevStartDate
+    prevEndDate.setHours(23, 59, 59, 999);
+  }
+
+  Logger.log(`Calculating Previous Period Inflow for: ${prevStartDate.toLocaleDateString()} to ${prevEndDate.toLocaleDateString()}`);
+
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const lendingSheet = ss.getSheetByName(DATA_MASTER_SHEET_NAME);
+
+  if (!lendingSheet) {
+    Logger.log(`Sheet '${DATA_MASTER_SHEET_NAME}' not found.`);
+    return 0;
+  }
+
+  const lendingRows = lendingSheet.getDataRange().getDisplayValues();
+  if (lendingRows.length <= 1) {
+    return 0;
+  }
+
+  const lendingHeader = lendingRows[0];
+  const lendingColMap = createHeaderMap(lendingHeader, DATA_MASTER_SHEET_NAME, ["TANGGAL PENCAIRAN", "PLAFON DIAJUKAN"]);
+  // const lendingColMap = createHeaderMap(lendingHeader, DATA_MASTER_SHEET_NAME, ["TANGGAL PENCAIRAN", "PINJAMAN DITERIMA"]);
+
+  const tanggalPencairanCol = lendingColMap["TANGGAL PENCAIRAN"];
+  const pinjamanDiterimaCol = lendingColMap["PLAFON DIAJUKAN"];
+  // const pinjamanDiterimaCol = lendingColMap["PINJAMAN DITERIMA"];
+
+  if (tanggalPencairanCol === -1 || pinjamanDiterimaCol === -1) {
+    Logger.log("Kolom 'TANGGAL PENCAIRAN' atau 'PINJAMAN DITERIMA' tidak ditemukan di sheet lending.");
+    return 0;
+  }
+
+  let previousInflow = 0;
+
+  for (let i = 1; i < lendingRows.length; i++) {
+    const row = lendingRows[i];
+    const tanggalPencairan = new Date(row[tanggalPencairanCol]);
+    const pinjamanDiterima = parseFloat(String(row[pinjamanDiterimaCol]).replace(/\./g, '').replace(/,/g, '.')); // Handle IDR format
+
+    if (!isNaN(tanggalPencairan.getTime()) && tanggalPencairan >= prevStartDate && tanggalPencairan <= prevEndDate) {
+      if (!isNaN(pinjamanDiterima)) {
+        previousInflow += pinjamanDiterima;
+      }
+    }
+  }
+  Logger.log(`Previous Period Inflow: ${previousInflow}`);
+  return previousInflow;
 }
 
 function getAbsensiData(startDate, endDate) {
@@ -893,16 +1092,243 @@ function getAbsensiDailyData(startDate, endDate, selectedMarketing) {
   // Mengurutkan berdasarkan tanggal, dari yang paling awal ke paling akhir
   // Jika ada data dengan tanggal yang sama, bisa diurutkan berdasarkan nama marketing
   result.sort((a, b) => {
-    const dateA = new Date(a.tanggal.replace(/(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})/, '$3-$2-$1T$4:$5:00')); // Konversi ke format Date yang bisa di-sort
+    // Konversi string tanggal ke objek Date agar bisa diurutkan
+    // Format 'dd-MM-yyyy HH:mm' perlu diubah ke 'YYYY-MM-DDTHH:mm:ss' agar Date() bisa parse dengan benar
+    const dateA = new Date(a.tanggal.replace(/(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})/, '$3-$2-$1T$4:$5:00'));
     const dateB = new Date(b.tanggal.replace(/(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})/, '$3-$2-$1T$4:$5:00'));
 
     if (dateA.getTime() !== dateB.getTime()) {
-      return dateA.getTime() - dateB.getTime();
+      return dateB.getTime() - dateA.getTime(); // PERUBAHAN DI SINI: Paling baru ke paling lama
     }
-    return a.name.localeCompare(b.name); // Jika tanggal sama, urutkan berdasarkan nama
+    // Jika tanggal sama, urutkan berdasarkan nama marketing secara alfabetis
+    return a.name.localeCompare(b.name);
   });
 
   Logger.log("Absensi Daily Data Result (first 5): " + JSON.stringify(result.slice(0, 5)));
   Logger.log("Absensi Daily Data Result (total items): " + result.length);
   return result;
+}
+
+/**
+ * Mengambil dan memfilter data detail pinjaman dari MASTER LENDING.
+ * @param {number} month Bulan yang dipilih (1-12).
+ * @param {number} year Tahun yang dipilih.
+ * @param {string} selectedMarketingParam Nama marketing yang dipilih, atau "All".
+ * @param {string} periodType Tipe periode ('monthly' atau 'weekly').
+ * @param {number} weekNumber Nomor minggu (jika periodType 'weekly').
+ * @param {number} weeklyYear Tahun untuk nomor minggu (jika periodType 'weekly').
+ * @returns {Array<Object>} Array of pinjaman data objects.
+ */
+function getDetailPinjamanData(month, year, selectedMarketingParam, periodType, weekNumber, weeklyYear) {
+  Logger.log(`[START] getDetailPinjamanData with params: month=${month}, year=${year}, selectedMarketingParam=${selectedMarketingParam}, periodType=${periodType}, weekNumber=${weekNumber}, weeklyYear=${weeklyYear}`);
+
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const lendingSheet = ss.getSheetByName(DATA_MASTER_SHEET_NAME);
+
+  if (!lendingSheet) {
+    Logger.log(`Sheet '${DATA_MASTER_SHEET_NAME}' not found for getDetailPinjamanData. Returning empty array.`);
+    return [];
+  }
+
+  const lendingRows = lendingSheet.getDataRange().getDisplayValues();
+  if (lendingRows.length <= 1) {
+    Logger.log('MASTER LENDING sheet is empty or only contains headers for getDetailPinjamanData. Returning empty array.');
+    return [];
+  }
+
+  const lendingHeader = lendingRows[0];
+  const requiredCols = [
+    "DEBITUR", "TELEPON", "NIK", "NOPEN", "PEKERJAAN", "ALAMAT", "PLAFON DIAJUKAN",
+    "PINJAMAN DITERIMA", "TANGGAL PENGAJUAN", "CHANNEL", "MARKETING", "STATUS"
+  ];
+  const lendingColMap = createHeaderMap(lendingHeader, DATA_MASTER_SHEET_NAME, requiredCols);
+
+  const colDebitur = lendingColMap['DEBITUR'];
+  const colTelepon = lendingColMap['TELEPON'];
+  const colNIK = lendingColMap['NIK'];
+  const colNopen = lendingColMap['NOPEN'];
+  const colPekerjaan = lendingColMap['PEKERJAAN'];
+  const colAlamat = lendingColMap['ALAMAT'];
+  const colPinjamanDiterima = lendingColMap['PLAFON DIAJUKAN'];
+  // const colPinjamanDiterima = lendingColMap['PINJAMAN DITERIMA'];
+  const colTanggalPengajuan = lendingColMap['TANGGAL PENGAJUAN'];
+  const colChannel = lendingColMap['CHANNEL'];
+  const colMarketing = lendingColMap['MARKETING'];
+  const colStatus = lendingColMap['STATUS'];
+
+  const detailPinjaman = [];
+
+  for (let i = 1; i < lendingRows.length; i++) {
+    const row = lendingRows[i];
+    const dateCell = row[colTanggalPengajuan];
+    const date = (dateCell instanceof Date) ? dateCell : new Date(dateCell);
+
+    if (isNaN(date.getTime())) {
+      continue;
+    }
+
+    const marketingNameInRow = (row[colMarketing] || '').toString().trim();
+
+    // Check date match
+    let isDateMatch = false;
+    if (periodType === 'monthly' && month !== null && year !== null) {
+      isDateMatch = date.getMonth() + 1 === parseInt(month) && date.getFullYear() === parseInt(year);
+    } else if (periodType === 'weekly' && weekNumber !== null && weeklyYear !== null) {
+      const rowWeekNumber = getWeekNumber(date);
+      // Asumsi weekNumberCalculated adalah typo dan seharusnya rowWeekNumber
+      isDateMatch = rowWeekNumber === parseInt(weekNumber) && date.getFullYear() === parseInt(weeklyYear);
+    } else {
+      isDateMatch = true; // Jika tidak ada filter waktu spesifik, anggap cocok
+    }
+
+    // Check marketing match
+    const isMarketingMatch = (selectedMarketingParam === 'All' || !selectedMarketingParam || marketingNameInRow === selectedMarketingParam);
+
+    if (isDateMatch && isMarketingMatch) {
+      detailPinjaman.push({
+        debitur: row[colDebitur] || '',
+        telepon: row[colTelepon] || '',
+        nik: row[colNIK] || '',
+        nopen: row[colNopen] || '',
+        pekerjaan: row[colPekerjaan] || '',
+        alamat: row[colAlamat] || '',
+        pinjamanDiterima: parseNumber(row[colPinjamanDiterima]), // Pastikan diformat sebagai angka
+        tanggalPencairan: row[colTanggalPengajuan] || '',
+        channel: row[colChannel] || '',
+        marketing: marketingNameInRow,
+        status: row[colStatus] || ''
+      });
+    }
+  }
+
+  // Sort the data by tanggalPencairan from newest to oldest
+  detailPinjaman.sort((a, b) => {
+    const dateA = new Date(a.tanggalPencairan.replace(/(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})/, '$3-$2-$1T$4:$5:00'));
+    const dateB = new Date(b.tanggalPencairan.replace(/(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})/, '$3-$2-$1T$4:$5:00'));
+    return dateB.getTime() - dateA.getTime(); // Sort descending (newest first)
+  });
+
+  Logger.log(`[END] getDetailPinjamanData. Found ${detailPinjaman.length} items.`);
+  return detailPinjaman;
+}
+
+function getSumOfNewCalculatedIncome(marketingPerformance) {
+  let sum = 0;
+  for (const name in marketingPerformance) {
+    sum += parseNumber(marketingPerformance[name].newCalculatedIncome);
+  }
+  return sum;
+}
+
+function getSumOfOutflow(marketingPerformance) {
+  let sum = 0;
+  for (const name in marketingPerformance) {
+    sum += parseNumber(marketingPerformance[name].outflow);
+  }
+  return sum;
+}
+
+/**
+ * Menghitung potensi pendapatan per marketing berdasarkan TANGGAL PENGAJUAN.
+ * Mengembalikan data dalam format yang mirip dengan performanceData.
+ * @param {Array<Array>} lendingRows Semua data dari sheet MASTER LENDING.
+ * @param {Object} lendingColMap Peta kolom untuk MASTER LENDING.
+ * @param {Object} initialMarketingPerformance Data awal marketing (untuk target).
+ * @param {Date} startDate Tanggal mulai periode.
+ * @param {Date} endDate Tanggal akhir periode.
+ * @param {string} selectedMarketingParam Marketing yang dipilih ('All' atau nama spesifik).
+ * @returns {Array<Object>} Array objek potensi pendapatan per marketing.
+ */
+function getPotensiPendapatanData(lendingRows, lendingColMap, initialMarketingPerformance, startDate, endDate, selectedMarketingParam) {
+  Logger.log(`[START] getPotensiPendapatanData for period: ${startDate.toDateString()} - ${endDate.toDateString()}`);
+
+  // Clone initial performance object untuk menghindari modifikasi objek asli
+  let potensiMarketingPerformance = JSON.parse(JSON.stringify(initialMarketingPerformance));
+
+  const colTanggalPengajuan = lendingColMap['TANGGAL PENGAJUAN'];
+  const colPlafonDiajukan = lendingColMap['PLAFON DIAJUKAN'];
+  const colMarketingName = lendingColMap['MARKETING'];
+  const colStatus = lendingColMap['STATUS'];
+
+  // Status yang dianggap sebagai "potensi" (belum ditolak/dibatalkan secara final)
+  const potentialStatuses = ['simulasi', 'verifikasi', 'approve', 'claimed'];
+
+  for (let i = 1; i < lendingRows.length; i++) { // Mulai dari baris 1 (setelah header)
+    const row = lendingRows[i];
+    const tanggalPengajuan = parseDate(row[colTanggalPengajuan]);
+    const marketingNameInRow = (row[colMarketingName] || '').toString().trim();
+    const plafonDiajukan = parseNumber(row[colPlafonDiajukan]);
+    const statusInRow = (row[colStatus] || '').toString().trim().toLowerCase();
+
+    // Filter berdasarkan tanggal pengajuan
+    if (tanggalPengajuan && tanggalPengajuan >= startDate && tanggalPengajuan <= endDate) {
+      // Filter berdasarkan marketing yang dipilih (jika bukan 'All')
+      const marketingMatch = (selectedMarketingParam === "All" || marketingNameInRow === selectedMarketingParam);
+
+      if (marketingMatch && potentialStatuses.includes(statusInRow)) {
+        if (potensiMarketingPerformance[marketingNameInRow]) {
+          // Akumulasi plafon diajukan sebagai "inflow" potensial
+          potensiMarketingPerformance[marketingNameInRow].inflow += plafonDiajukan;
+        } else {
+          // Jika marketing tidak ada di initialMarketingPerformance (misal: baru direkrut/data belum update)
+          // Anda bisa memilih untuk mengabaikannya atau menambahkannya dengan target 0
+          Logger.log(`Marketing "${marketingNameInRow}" not found in initialMarketingPerformance. Skipping potential aggregation for this entry.`);
+        }
+      }
+    }
+  }
+
+  // Format data ke dalam array yang mirip dengan performanceData
+  const potensiPendapatanData = [];
+  for (const name in potensiMarketingPerformance) {
+    const data = potensiMarketingPerformance[name];
+    const target = data.target;
+    const potensiInflow = data.inflow;
+    const kinerja = target > 0 ? (potensiInflow / target) : 0;
+
+    potensiPendapatanData.push({
+      name: name,
+      performance: kinerja * 100, // Konversi ke persentase
+      commission: 0, // Tidak ada komisi untuk potensi
+      inflow: potensiInflow, // Ini adalah plafon diajukan
+      target: target,
+      totalProspect: 0, // Tidak relevan di sini, ini adalah potensi closing
+      totalClosing: 0 // Tidak relevan di sini
+    });
+  }
+
+  potensiPendapatanData.sort((a, b) => b.performance - a.performance);
+  Logger.log(`[END] getPotensiPendapatanData. Result (first 5): ${JSON.stringify(potensiPendapatanData.slice(0, 5))}`);
+  return potensiPendapatanData;
+}
+
+/**
+ * Helper untuk menjumlahkan 'inflow' (potensi pendapatan) dari array potensiPendapatanData.
+ * @param {Array<Object>} potensiPendapatanData
+ * @returns {number}
+ */
+function getSumOfPotensiPendapatan(potensiPendapatanData) {
+  let sum = 0;
+  for (const item of potensiPendapatanData) {
+    sum += item.inflow;
+  }
+  return sum;
+}
+
+/**
+ * Mengubah nilai dari spreadsheet (teks, angka, atau objek Date) menjadi objek Date yang valid.
+ * @param {*} value Nilai yang akan diparse.
+ * @returns {Date|null} Objek Date jika berhasil, null jika gagal.
+ */
+function parseDate(value) {
+  if (value instanceof Date) {
+    return value;
+  }
+  if (typeof value === 'string' || typeof value === 'number') {
+    const date = new Date(value);
+    if (!isNaN(date.getTime())) {
+      return date;
+    }
+  }
+  return null;
 }
