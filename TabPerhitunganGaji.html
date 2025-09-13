@@ -1,19 +1,84 @@
-<h3>Perhitungan Gaji dan Komisi Marketing</h3>
-<table>
-  <thead>
-    <tr>
-      <th>Nama Marketing</th>
-      <th>Gaji Kontrak (Rp)</th>
-      <th>Total Gaji (Rp)</th>
-      <th>Komisi Fee Cair (Rp)</th>
-      <th>Reward Tambahan (Rp)</th>
-      <th>Total Komisi (Rp)</th>
-      <th>Total Dibayarkan (Rp)</th>
-    </tr>
-  </thead>
-  <tbody id="gajiKomisiTableBody">
-    <tr>
-      <td colspan="7" style="text-align: center;">Memuat data...</td>
-    </tr>
-  </tbody>
-</table>
+<style>
+  .tab-button-gaji {
+    flex-grow: 1;
+    padding: 12px 20px;
+    border: none;
+    background-color: transparent;
+    font-size: 1em;
+    font-weight: 600;
+    cursor: pointer;
+    color: #555;
+    border-bottom: 3px solid #dee2e6;
+    transition: all 0.3s ease;
+    text-align: center;
+  }
+
+  .tab-button-gaji:hover:not(.active) {
+    background-color: #dee2e6;
+    color: #333;
+  }
+
+  .tab-button-gaji.active {
+    background-color: #007bff;
+    color: white;
+    border-bottom: 3px solid #0056b3;
+  }
+
+  .tab-content-gaji {
+    overflow-y: auto;
+    background-color: #ffffff;
+    border-radius: 10px;
+    margin-top: 12px;
+    box-shadow: 0 0px 12px rgba(0, 0, 0, 0.2);
+    padding: 25px;
+    display: none;
+    min-height: 50vh;
+  }
+
+  .tab-content-gaji.active {
+    display: block;
+  }
+</style>
+
+
+<div class="tab-container">
+  <button class="tab-button-gaji active" onclick="openGajiTab(event, 'gajiMarketing')">Perhitungan Gaji dan Komisi Marketing</button>
+  <button class="tab-button-gaji" onclick="openGajiTab(event, 'gajiRecruiter')">Perhitungan Komisi Recruiter</button>
+</div>
+
+<div id="gajiMarketing" class="tab-content-gaji" style="display: block;">
+  <table id="gajiKomisiTable">
+    <thead>
+      <tr>
+        <th>Nama Marketing</th>
+        <th>Gaji Kontrak (Rp)</th>
+        <th>Total Gaji (Rp)</th>
+        <th>Komisi Fee Cair (Rp)</th>
+        <th>Reward Tambahan (Rp)</th>
+        <th>Total Komisi (Rp)</th>
+        <th>Total Dibayarkan (Rp)</th>
+      </tr>
+    </thead>
+    <tbody id="gajiKomisiTableBody">
+      <tr>
+        <td colspan="7" style="text-align: center;">Memuat data...</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div id="gajiRecruiter" class="tab-content-gaji" style="display: block;">
+  <table id="gajiRecruiterTable">
+    <thead>
+      <tr>
+        <th>Nama Recruiter</th>
+        <th>Total Komisi (Rp)</th>
+      </tr>
+    </thead>
+    <tbody id="gajiRecruiterTableBody">
+      <tr>
+        <td colspan="7" style="text-align: center;">Memuat data...</td>
+      </tr>
+    </tbody>
+  </table>
+</div>

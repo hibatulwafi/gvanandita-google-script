@@ -4,7 +4,7 @@
     'Agustus', 'September', 'Oktober', 'November', 'Desember'
   ];
 
-  let currentCharts = {}; // Object to hold Chart.js instances
+  let currentCharts = {};
 
   function toggleLoading(show) {
     document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
@@ -21,6 +21,8 @@
     updateDashboardView();
     openTab(null, 'laporanUtama');
     openAbsensiTab(null,'monthlyAbsensi');
+    openReportTab(null,'performanceMarketing');
+    openGajiTab(null,'gajiMarketing');
   });
 
   function populateFilters() {
@@ -136,132 +138,326 @@
 
     if (data) { // Cek data secara keseluruhan, bukan hanya summary
       // Bagian Summary Cards
-      if (data.summary) {
+      if (data && data.summary) {
         document.getElementById('totalGrowth').textContent = formatCurrency(data.summary.totalGrowth);
         document.getElementById('totalGrowth').classList.toggle('negative', data.summary.totalGrowth < 0);
+
         document.getElementById('overallTarget').textContent = data.summary.overallTargetPercentage.toFixed(2) + '%';
+
         document.getElementById('totalInflow').textContent = formatCurrency(data.summary.totalInflow);
-        document.getElementById('totalOutflow').textContent = formatCurrency(data.summary.totalOutflow);
-        document.getElementById('totalOutflow').classList.toggle('negative', data.summary.totalOutflow < 0);
+
+        // BARU: Closing Rate
+        // Pastikan ID di HTML adalah 'closingRateDisplay'
+        const closingRate = data.summary.closingRate !== undefined ? data.summary.closingRate : 0;
+        document.getElementById('closingRateDisplay').textContent = closingRate.toFixed(2) + '%';
+
+        // BARU: Gross Profit
+        // Pastikan ID di HTML adalah 'grossProfit'
+        document.getElementById('grossProfit').textContent = formatCurrency(data.summary.newCalculatedIncome);
+        document.getElementById('grossProfit').classList.toggle('negative', data.summary.newCalculatedIncome < 0);
+
         document.getElementById('totalGaji').textContent = formatCurrency(data.summary.totalGaji);
+
         document.getElementById('totalKomisi').textContent = formatCurrency(data.summary.totalKomisi);
-        document.getElementById('totalProspect').textContent = data.summary.totalProspect;
-        document.getElementById('totalClosing').textContent = data.summary.totalClosing;
-      } else {
-        // Handle case where summary data is missing
+
+        // BARU: Net Profit
+        // Pastikan ID di HTML adalah 'netProfit'
+        document.getElementById('netProfit').textContent = formatCurrency(data.summary.netProfit);
+        document.getElementById('netProfit').classList.toggle('negative', data.summary.netProfit < 0);
+
+        // BARU: New Calculated Income (jika Anda ingin menampilkannya di card)
+        // Jika Anda membuat card terpisah untuk ini, berikan ID di HTML
+        // Misalnya, jika ada card dengan id="newCalculatedIncomeDisplay"
+        // if (document.getElementById('newCalculatedIncomeDisplay')) {
+        //     document.getElementById('newCalculatedIncomeDisplay').textContent = formatCurrency(data.summary.newCalculatedIncome);
+        // }
+
+    } else {
+        // Handle case where summary data is missing or empty
+        console.error("Data summary tidak ditemukan atau kosong. Mereset nilai card.");
         document.getElementById('totalGrowth').textContent = 'Rp0';
         document.getElementById('overallTarget').textContent = '0%';
         document.getElementById('totalInflow').textContent = 'Rp0';
-        document.getElementById('totalOutflow').textContent = 'Rp0';
+        // BARU: Reset Closing Rate
+        document.getElementById('closingRateDisplay').textContent = '0%';
+        // BARU: Reset Gross Profit
+        document.getElementById('grossProfit').textContent = 'Rp0';
         document.getElementById('totalGaji').textContent = 'Rp0';
         document.getElementById('totalKomisi').textContent = 'Rp0';
-        document.getElementById('totalProspect').textContent = '0';
-        document.getElementById('totalClosing').textContent = '0';
-      }
+        // BARU: Reset Net Profit
+        document.getElementById('netProfit').textContent = 'Rp0';
+        // Jika Anda menambahkan card newCalculatedIncome, tambahkan reset di sini
+        // if (document.getElementById('newCalculatedIncomeDisplay')) {
+        //     document.getElementById('newCalculatedIncomeDisplay').textContent = 'Rp0';
+        // }
 
+        // Hapus baris di bawah ini jika elemen HTML-nya sudah tidak ada
+        // document.getElementById('totalOutflow').textContent = 'Rp0';
+        // document.getElementById('totalProspect').textContent = '0';
+        // document.getElementById('totalClosing').textContent = '0';
+    }
+
+    function getDataTableOptions(colCount) {
+        return {
+            dom: 'Bfrtip',
+            buttons: [
+                { extend: 'copy', text: 'Copy' },
+                { extend: 'csv', text: 'CSV' },
+                { extend: 'excel', text: 'Excel' },
+                { extend: 'pdf', text: 'PDF' },
+                { extend: 'print', text: 'Print' }
+            ],
+            language: {
+                url: '//cdn.datatables.net/plug-ins/2.0.8/i18n/id.json'
+            },
+            autoWidth: false,
+            responsive: true,
+        };
+    }
+    
       // Tampilkan data performance
       const performanceTableBody = document.getElementById('performanceTableBody');
       if (performanceTableBody) {
-        performanceTableBody.innerHTML = ''; // Bersihkan isi tabel sebelumnya
-        if (data.performanceData && data.performanceData.length > 0) {
-          data.performanceData.forEach(item => {
-            const row = performanceTableBody.insertRow();
-            row.insertCell(0).textContent = item.name;
-            row.insertCell(1).textContent = (item.performance * 100).toFixed(2) + '%'; 
-            row.insertCell(2).textContent = formatCurrency(item.commission);
-            row.insertCell(3).textContent = formatCurrency(item.inflow);
-            row.insertCell(4).textContent = item.totalProspect; // Prospect Berjalan
-          });
-        } else {
-          performanceTableBody.innerHTML = '<tr><td colspan="5" style="text-align: center;">Tidak ada data performance untuk periode ini.</td></tr>';
-        }
+          const tableElement = $('#performanceTable');
+
+          // Cek apakah tabel sudah memiliki instance DataTables.
+          // Jika ada, hancurkan instance yang lama sebelum membersihkan tabel.
+          if ($.fn.DataTable.isDataTable(tableElement)) {
+              tableElement.DataTable().destroy();
+          }
+
+          // Bersihkan isi tabel sebelumnya
+          performanceTableBody.innerHTML = '';
+
+          if (data.performanceData && data.performanceData.length > 0) {
+              data.performanceData.forEach(item => {
+                  const row = performanceTableBody.insertRow();
+                  row.insertCell(0).textContent = item.name;
+                  row.insertCell(1).textContent = (item.performance).toFixed(2) + '%'; 
+                  row.insertCell(2).textContent = formatCurrency(item.commission);
+                  row.insertCell(3).textContent = formatCurrency(item.inflow);
+                  row.insertCell(4).textContent = item.totalClosing;
+                  row.insertCell(5).textContent = item.totalProspect;
+              });
+              
+              // Inisialisasi ulang DataTables pada tabel yang baru diisi
+              tableElement.DataTable(getDataTableOptions(6));
+          } else {
+              // PERBAIKI: Kolom harus 6, bukan 5
+              performanceTableBody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Tidak ada data performance untuk periode ini.</td></tr>';
+          }
       } else {
-        console.error("Elemen 'performanceTableBody' tidak ditemukan.");
+          console.error("Elemen 'performanceTableBody' tidak ditemukan.");
+      }
+
+      const dataPinjamanTableBody = document.getElementById('dataPinjamanTableBody');
+      if (dataPinjamanTableBody) {
+          const tableElement = $('#dataPinjamanTable');
+
+          // Cek apakah tabel sudah memiliki instance DataTables.
+          // Jika ada, hancurkan instance yang lama sebelum membersihkan tabel.
+          if ($.fn.DataTable.isDataTable(tableElement)) {
+              tableElement.DataTable().destroy();
+          }
+
+          // Bersihkan isi tabel sebelumnya
+          dataPinjamanTableBody.innerHTML = '';
+
+          if (data.detailPinjamanData && data.detailPinjamanData.length > 0) {
+              data.detailPinjamanData.forEach(item => {
+                  const row = dataPinjamanTableBody.insertRow();
+                  row.insertCell(0).textContent = item.debitur;
+                  row.insertCell(1).textContent = item.telepon;
+                  row.insertCell(2).textContent = item.nik;
+                  row.insertCell(3).textContent = item.nopen;
+                  row.insertCell(4).textContent = item.pekerjaan;
+                  row.insertCell(5).textContent = item.alamat;
+                  row.insertCell(6).textContent = formatCurrency(item.pinjamanDiterima);
+                  row.insertCell(7).textContent = item.tanggalPencairan;
+                  row.insertCell(8).textContent = item.channel;
+                  row.insertCell(9).textContent = item.marketing;
+                  row.insertCell(10).textContent = item.status;
+              });
+              
+              // Inisialisasi ulang DataTables pada tabel yang baru diisi
+              tableElement.DataTable(getDataTableOptions(11));
+          } else {
+              dataPinjamanTableBody.innerHTML = '<tr><td colspan="11" style="text-align: center;">Tidak ada data pinjaman untuk periode ini.</td></tr>';
+          }
+      }
+
+      // Potential Table
+      const potentialClosingBody = document.getElementById('potentialClosingBody');
+      if (potentialClosingBody) {
+          const tableElement = $('#potentialTable');
+          // Cek apakah tabel sudah memiliki instance DataTables. Jika ada, hancurkan.
+          if ($.fn.DataTable.isDataTable(tableElement)) {
+              tableElement.DataTable().destroy();
+          }
+
+          // Bersihkan isi tabel sebelumnya
+          potentialClosingBody.innerHTML = '';
+
+          if (data.potensiPendapatanData && data.potensiPendapatanData.length > 0) {
+              data.potensiPendapatanData.forEach(item => {
+                  const row = potentialClosingBody.insertRow();
+                  // Pastikan Anda selalu memasukkan 6 sel
+                  row.insertCell(0).textContent = item.name || '';
+                  row.insertCell(1).textContent = (item.performance ? item.performance.toFixed(2) : 0) + '%';
+                  // row.insertCell(2).textContent = formatCurrency(item.commission || 0); // Komisi harusnya 0 untuk data potensi
+                  row.insertCell(2).textContent = formatCurrency(item.inflow || 0);
+                  // row.insertCell(4).textContent = item.totalClosing || 0;
+                  // row.insertCell(5).textContent = item.totalProspect || 0;
+              });
+
+              // Inisialisasi ulang DataTables dengan 6 kolom
+              tableElement.DataTable(getDataTableOptions(6));
+          } else {
+              // PERBAIKAN: colspan harus sesuai dengan jumlah kolom di header (6)
+              potentialClosingBody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Tidak ada data Potensi untuk periode ini.</td></tr>';
+          }
+      } else {
+          console.error("Elemen 'potentialClosingBody' tidak ditemukan.");
       }
 
       // Tampilkan data gaji dan komisi
       const gajiKomisiTableBody = document.getElementById('gajiKomisiTableBody');
       if (gajiKomisiTableBody) {
-        gajiKomisiTableBody.innerHTML = '';
-        if (data.gajiKomisiData && data.gajiKomisiData.length > 0) {
-          data.gajiKomisiData.forEach(item => {
-            const row = gajiKomisiTableBody.insertRow();
-            row.insertCell(0).textContent = item.name;
-            row.insertCell(1).textContent = formatCurrency(item.gajiKontrakAwal);
-            row.insertCell(2).textContent = formatCurrency(item.gajiFinal);
-            row.insertCell(3).textContent = formatCurrency(item.feeMarketingCair);
-            row.insertCell(4).textContent = formatCurrency(item.rewardTambahan);
-            row.insertCell(5).textContent = formatCurrency(item.totalKomisi);
-            row.insertCell(6).textContent = formatCurrency(item.totalDibayarkan);
-          });
-        } else {
-          gajiKomisiTableBody.innerHTML = '<tr><td colspan="7" style="text-align: center;">Tidak ada data gaji dan komisi untuk periode ini.</td></tr>';
-        }
+          const tableElement = $('#gajiKomisiTable');
+
+          // Cek apakah tabel sudah memiliki instance DataTables.
+          // Jika ada, hancurkan instance yang lama sebelum membersihkan tabel.
+          if ($.fn.DataTable.isDataTable(tableElement)) {
+              tableElement.DataTable().destroy();
+          }
+
+          // Bersihkan isi tabel sebelumnya
+          gajiKomisiTableBody.innerHTML = '';
+
+          if (data.gajiKomisiData && data.gajiKomisiData.length > 0) {
+              data.gajiKomisiData.forEach(item => {
+                  const row = gajiKomisiTableBody.insertRow();
+                  row.insertCell(0).textContent = item.name;
+                  row.insertCell(1).textContent = formatCurrency(item.gajiKontrakAwal);
+                  row.insertCell(2).textContent = formatCurrency(item.gajiFinal);
+                  row.insertCell(3).textContent = formatCurrency(item.feeMarketingCair);
+                  row.insertCell(4).textContent = formatCurrency(item.rewardTambahan);
+                  row.insertCell(5).textContent = formatCurrency(item.totalKomisi);
+                  row.insertCell(6).textContent = formatCurrency(item.totalDibayarkan);
+              });
+
+              // Inisialisasi ulang DataTables pada tabel yang baru diisi
+              tableElement.DataTable(getDataTableOptions(7));
+          } else {
+              gajiKomisiTableBody.innerHTML = '<tr><td colspan="7" style="text-align: center;">Tidak ada data gaji dan komisi untuk periode ini.</td></tr>';
+          }
       } else {
-        console.error("Elemen 'gajiKomisiTableBody' tidak ditemukan.");
+          console.error("Elemen 'gajiKomisiTableBody' tidak ditemukan.");
       }
 
-      // Tampilkan data Negative Growth Table
-      const negativeGrowthTableBody = document.getElementById('negativeGrowthTableBody');
-      if (negativeGrowthTableBody) {
-        negativeGrowthTableBody.innerHTML = '';
-        if (data.negativeGrowth && data.negativeGrowth.length > 0) {
-          data.negativeGrowth.forEach(item => {
-            const row = negativeGrowthTableBody.insertRow();
-            row.insertCell(0).textContent = item.name;
-            row.insertCell(1).textContent = formatCurrency(item.performance); // Assuming performance here is growth (Rp)
-          });
-        } else {
-          negativeGrowthTableBody.innerHTML = '<tr><td colspan="2" style="text-align: center;">Tidak ada marketing dengan pertumbuhan negatif.</td></tr>';
-        }
+      // Tampilkan data gaji dan komisi
+      const gajiRecruiterTableBody = document.getElementById('gajiRecruiterTableBody');
+      if (gajiRecruiterTableBody) {
+          const tableElement = $('#gajiRecruiterTable');
+
+          // Cek apakah tabel sudah memiliki instance DataTables.
+          // Jika ada, hancurkan instance yang lama sebelum membersihkan tabel.
+          if ($.fn.DataTable.isDataTable(tableElement)) {
+              tableElement.DataTable().destroy();
+          }
+
+          // Bersihkan konten sebelumnya
+          gajiRecruiterTableBody.innerHTML = ''; 
+
+          // Data recruiterPerformance adalah objek, jadi kita ambil kuncinya (nama recruiter)
+          if (data.recruiterPerformance && Object.keys(data.recruiterPerformance).length > 0) {
+              const recruiterNames = Object.keys(data.recruiterPerformance).sort((a, b) => a.localeCompare(b));
+              recruiterNames.forEach(recruiterName => {
+                  const recruiterData = data.recruiterPerformance[recruiterName];
+                  const row = gajiRecruiterTableBody.insertRow();
+                  row.insertCell(0).textContent = recruiterName; // Nama Recruiter
+                  row.insertCell(1).textContent = formatCurrency(recruiterData.totalKomisi); // Total Komisi Recruiter
+              });
+              
+              // Inisialisasi ulang DataTables pada tabel yang baru diisi
+              tableElement.DataTable(getDataTableOptions(2));
+          } else {
+              // Kolom untuk tabel recruiter hanya 2
+              gajiRecruiterTableBody.innerHTML = '<tr><td colspan="2" style="text-align: center;">Tidak ada data komisi recruiter untuk periode ini.</td></tr>';
+          }
       } else {
-        console.error("Elemen 'negativeGrowthTableBody' tidak ditemukan.");
+          console.error("Elemen 'gajiRecruiterTableBody' tidak ditemukan.");
       }
 
-      // Tampilkan data Absensi
+      // --- Perbaikan pada kode tabel Absensi ---
       const absensiTableBody = document.getElementById('absensiTableBody');
       if (absensiTableBody) {
-        absensiTableBody.innerHTML = ''; // Bersihkan isi tabel sebelumnya
-        if (data.absensiData && data.absensiData.length > 0) {
-          let no = 1;
-          data.absensiData.forEach(item => {
-            const row = absensiTableBody.insertRow();
-            row.insertCell(0).textContent = no++;
-            row.insertCell(1).textContent = item.name;
-            row.insertCell(2).textContent = item.jumlahHariKerja;
-            row.insertCell(3).textContent = item.totalKunjungan;
-            row.insertCell(4).textContent = item.rataRataKunjungan.toFixed(2) + '/hari';
-            row.insertCell(5).textContent = item.presentase + '%';
-          });
-        } else {
-          absensiTableBody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Tidak ada data absensi untuk periode ini.</td></tr>';
-        }
+          const tableElement = $('#absensiTable');
+
+          // Cek apakah tabel sudah memiliki instance DataTables.
+          // Jika ada, hancurkan.
+          if ($.fn.DataTable.isDataTable(tableElement)) {
+              tableElement.DataTable().destroy();
+          }
+
+          // Bersihkan isi tabel sebelumnya
+          absensiTableBody.innerHTML = '';
+
+          if (data.absensiData && data.absensiData.length > 0) {
+              let no = 1;
+              data.absensiData.forEach(item => {
+                  const row = absensiTableBody.insertRow();
+                  row.insertCell(0).textContent = no++;
+                  row.insertCell(1).textContent = item.name;
+                  row.insertCell(2).textContent = item.jumlahHariKerja;
+                  row.insertCell(3).textContent = item.totalKunjungan;
+                  row.insertCell(4).textContent = Math.ceil(item.presentase) + '%';
+              });
+
+              // Inisialisasi ulang DataTables
+              tableElement.DataTable(getDataTableOptions(5));
+          } else {
+              absensiTableBody.innerHTML = '<tr><td colspan="5" style="text-align: center;">Tidak ada data absensi untuk periode ini.</td></tr>';
+          }
       } else {
-        console.error("Elemen 'absensiTableBody' tidak ditemukan.");
+          console.error("Elemen 'absensiTableBody' tidak ditemukan.");
       }
 
-      // Tampilkan data Daily
+      // --- Perbaikan pada kode tabel Daily ---
       const absensiDailyTableBody = document.getElementById('absensiDailyTableBody');
       if (absensiDailyTableBody) {
-        absensiDailyTableBody.innerHTML = ''; // Bersihkan isi tabel sebelumnya
-        if (data.absensiDailyData && data.absensiDailyData.length > 0) {
-          let no = 1;
-          data.absensiDailyData.forEach(item => {
-            const row = absensiDailyTableBody.insertRow();
-            row.insertCell(0).textContent = no++;
-            row.insertCell(1).textContent = item.name ;
-            row.insertCell(2).textContent = item.tanggal;
-            row.insertCell(3).textContent = item.namaAnggotaCalonAnggota;
-            row.insertCell(4).textContent = item.alamat;
-            row.insertCell(5).textContent = item.fuVia;
-            row.insertCell(6).textContent = item.keterangan;
-            row.insertCell(7).textContent = item.hasilKunjungan;
-          });
-        } else {
-          absensiDailyTableBody.innerHTML = '<tr><td colspan="8" style="text-align: center;">Tidak ada data absensi untuk periode ini.</td></tr>';
-        }
+          const tableElement = $('#absensiDailyTable');
+
+          // Cek apakah tabel sudah memiliki instance DataTables.
+          // Jika ada, hancurkan.
+          if ($.fn.DataTable.isDataTable(tableElement)) {
+              tableElement.DataTable().destroy();
+          }
+
+          // Bersihkan isi tabel sebelumnya
+          absensiDailyTableBody.innerHTML = '';
+
+          if (data.absensiDailyData && data.absensiDailyData.length > 0) {
+              let no = 1;
+              data.absensiDailyData.forEach(item => {
+                  const row = absensiDailyTableBody.insertRow();
+                  row.insertCell(0).textContent = no++;
+                  row.insertCell(1).textContent = item.name;
+                  row.insertCell(2).textContent = item.tanggal;
+                  row.insertCell(3).textContent = item.namaAnggotaCalonAnggota;
+                  row.insertCell(4).textContent = item.alamat;
+                  row.insertCell(5).textContent = item.fuVia;
+                  row.insertCell(6).textContent = item.keterangan;
+                  row.insertCell(7).textContent = item.hasilKunjungan;
+              });
+
+              // Inisialisasi ulang DataTables
+              tableElement.DataTable(getDataTableOptions(8));
+          } else {
+              absensiDailyTableBody.innerHTML = '<tr><td colspan="8" style="text-align: center;">Tidak ada data absensi untuk periode ini.</td></tr>';
+          }
       } else {
-        console.error("Elemen 'absensiDailyTableBody' tidak ditemukan.");
+          console.error("Elemen 'absensiDailyTableBody' tidak ditemukan.");
       }
 
       // Render charts when data is available (jika tab analisis visual aktif)
@@ -390,6 +586,67 @@
 
   }
 
+  
+  function openReportTab(evt, tabName) {
+    let i, tabcontent, tabbuttons;
+
+    tabcontent = document.getElementsByClassName("tab-content-laporan");
+    for (i = 0; i < tabcontent.length; i++) {
+      tabcontent[i].style.display = "none";
+    }
+
+    tabbuttons = document.getElementsByClassName("tab-button-laporan");
+    for (i = 0; i < tabbuttons.length; i++) {
+      tabbuttons[i].className = tabbuttons[i].className.replace(" active", "");
+    }
+
+    const selectedTab = document.getElementById(tabName);
+    if (selectedTab) {
+      selectedTab.style.display = "block";
+      selectedTab.classList.add('active');
+    }
+
+    if (evt) { // Only add active class if clicked
+      evt.currentTarget.className += " active";
+    } else { // For initial load, set active class on the default button
+      const defaultButton = document.querySelector(`.tab-button-laporan[onclick*='${tabName}']`);
+      if (defaultButton) {
+        defaultButton.className += " active";
+      }
+    }
+
+  }
+ 
+  
+  function openGajiTab(evt, tabName) {
+    let i, tabcontent, tabbuttons;
+
+    tabcontent = document.getElementsByClassName("tab-content-gaji");
+    for (i = 0; i < tabcontent.length; i++) {
+      tabcontent[i].style.display = "none";
+    }
+
+    tabbuttons = document.getElementsByClassName("tab-button-gaji");
+    for (i = 0; i < tabbuttons.length; i++) {
+      tabbuttons[i].className = tabbuttons[i].className.replace(" active", "");
+    }
+
+    const selectedTab = document.getElementById(tabName);
+    if (selectedTab) {
+      selectedTab.style.display = "block";
+      selectedTab.classList.add('active');
+    }
+
+    if (evt) { // Only add active class if clicked
+      evt.currentTarget.className += " active";
+    } else { // For initial load, set active class on the default button
+      const defaultButton = document.querySelector(`.tab-button-gaji[onclick*='${tabName}']`);
+      if (defaultButton) {
+        defaultButton.className += " active";
+      }
+    }
+
+  }
 
   // --- Chart Rendering Functions ---
   function renderCharts(data) {
@@ -422,7 +679,7 @@
 
     const marketingNames = data.performanceData.map(item => item.name);
     const performancePercentages = data.performanceData.map(item => item.performance);
-    const totalInflows = data.performanceData.map(item => item.totalInflow);
+    const totalInflows = data.performanceData.map(item => item.inflow);
     const totalProspects = data.performanceData.map(item => item.totalProspect);
     const totalClosings = data.performanceData.map(item => item.totalClosing);
 
@@ -484,6 +741,7 @@
 
     // Chart 2: Total Inflow per Marketing
     const inflowCtx = document.getElementById('inflowChart').getContext('2d');
+
     currentCharts.inflowChart = new Chart(inflowCtx, {
       type: 'bar',
       data: {
@@ -613,5 +871,7 @@
         }
       }
     });
+
+     
   }
 </script>

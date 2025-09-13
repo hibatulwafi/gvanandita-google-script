@@ -1,25 +1,105 @@
-<h3>Performance Marketing</h3>
-<table>
-  <thead>
-    <tr>
-      <th>Nama Marketing</th>
-      <th>Pencapaian (%)</th>
-      <th>Total Komisi (Rp)</th>
-      <th>Total Closing (Rp)</th>
-      <th>Prospect Berjalan</th>
-    </tr>
-  </thead>
-  <tbody id="performanceTableBody">
-  </tbody>
-</table>
-<h3 style="margin-top: 30px;">Marketing dengan Pertumbuhan Negatif</h3>
-<table>
-  <thead>
-    <tr>
-      <th>Nama Marketing</th>
-      <th>Total Growth (Rp)</th>
-    </tr>
-  </thead>
-  <tbody id="negativeGrowthTableBody">
-  </tbody>
-</table>
+<style>
+  .tab-button-laporan {
+    flex-grow: 1;
+    padding: 12px 20px;
+    border: none;
+    background-color: transparent;
+    font-size: 1em;
+    font-weight: 600;
+    cursor: pointer;
+    color: #555;
+    border-bottom: 3px solid #dee2e6;
+    transition: all 0.3s ease;
+    text-align: center;
+  }
+
+  .tab-button-laporan:hover:not(.active) {
+    background-color: #dee2e6;
+    color: #333;
+  }
+
+  .tab-button-laporan.active {
+    background-color: #007bff;
+    color: white;
+    border-bottom: 3px solid #0056b3;
+  }
+
+  .tab-content-laporan {
+    overflow-y: auto;
+    background-color: #ffffff;
+    border-radius: 10px;
+    margin-top: 12px;
+    box-shadow: 0 0px 12px rgba(0, 0, 0, 0.2);
+    padding: 25px;
+    display: none;
+    min-height: 50vh;
+  }
+
+  .tab-content-laporan.active {
+    display: block;
+  }
+</style>
+
+
+
+<div class="tab-container">
+  <button class="tab-button-laporan active" onclick="openReportTab(event, 'performanceMarketing')">Performance Marketing</button>
+  <button class="tab-button-laporan" onclick="openReportTab(event, 'dataLending')">Data Pinjaman</button>
+  <button class="tab-button-laporan" onclick="openReportTab(event, 'potentialClosing')">Potensi Closing</button>
+</div>
+
+<div id="performanceMarketing" class="tab-content-laporan" style="display: block;">
+  <table id="performanceTable">
+    <thead>
+      <tr>
+        <th>Nama Marketing</th>
+        <th>Pencapaian (%)</th>
+        <th>Total Komisi (Rp)</th>
+        <th>Total Closing (Rp)</th>
+        <th>Jumlah Closing</th>
+        <th>Prospect Berjalan</th>
+      </tr>
+    </thead>
+    <tbody id="performanceTableBody">
+    </tbody>
+  </table>
+</div>
+
+<div id="dataLending" class="tab-content-laporan" style="display: block;">
+  <table id="dataPinjamanTable">
+    <thead>
+      <tr>
+        <th>Debitur</th>
+        <th>Telepon</th>
+        <th>NIK</th>
+        <th>No Pensiun</th>
+        <th>Pekerjaan</th>
+        <th>Alamat</th>
+        <th>Pinjaman</th>
+        <th>Pencairan</th>
+        <th>Channel</th>
+        <th>Marketing</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody id="dataPinjamanTableBody"> </tbody>
+  </table>
+</div>
+
+
+<div id="potentialClosing" class="tab-content-laporan" style="display: block;">
+  <table id="potentialTable">
+    <thead>
+      <tr>
+        <th>Nama</th>
+        <th>Kinerja</th>
+        <!-- <th>Komisi</th> -->
+        <th>Potensi Inflow</th>
+        <!-- <th>Closing</th> -->
+        <!-- <th>Prospek</th> -->
+      </tr>
+    </thead>
+    <tbody id="potentialClosingBody">
+    </tbody>
+  </table>
+</div>
